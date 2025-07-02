@@ -108,20 +108,20 @@ jobs:
         echo "Using VPC: $VPC_ID"
         echo "Using Subnets: $SUBNET1_ID, $SUBNET2_ID"
         
-        # Create security groups
-        ALB_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-alb-sg --description "ChopperTracker ALB Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
-        ECS_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-ecs-sg --description "ChopperTracker ECS Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
-        REDIS_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-redis-sg --description "ChopperTracker Redis Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        # Create or get existing security groups
+        ALB_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-alb-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || aws ec2 create-security-group --group-name choppertracker-alb-sg --description "ChopperTracker ALB Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        ECS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-ecs-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || aws ec2 create-security-group --group-name choppertracker-ecs-sg --description "ChopperTracker ECS Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        REDIS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-redis-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || aws ec2 create-security-group --group-name choppertracker-redis-sg --description "ChopperTracker Redis Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
         
-        # ALB security group rules (HTTP/HTTPS from anywhere)
-        aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0
-        aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0
+        # ALB security group rules (HTTP/HTTPS from anywhere) - ignore if rules already exist
+        aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0 || echo "Port 80 rule may already exist"
+        aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0 || echo "Port 443 rule may already exist"
         
-        # ECS security group rules (from ALB only)
-        aws ec2 authorize-security-group-ingress --group-id $ECS_SG_ID --protocol tcp --port 80 --source-group $ALB_SG_ID
+        # ECS security group rules (from ALB only) - ignore if rules already exist
+        aws ec2 authorize-security-group-ingress --group-id $ECS_SG_ID --protocol tcp --port 80 --source-group $ALB_SG_ID || echo "ECS port 80 rule may already exist"
         
-        # Redis security group rules (from ECS only)
-        aws ec2 authorize-security-group-ingress --group-id $REDIS_SG_ID --protocol tcp --port 6379 --source-group $ECS_SG_ID
+        # Redis security group rules (from ECS only) - ignore if rules already exist
+        aws ec2 authorize-security-group-ingress --group-id $REDIS_SG_ID --protocol tcp --port 6379 --source-group $ECS_SG_ID || echo "Redis port 6379 rule may already exist"
         
         echo "VPC_ID=$VPC_ID" >> deployment_vars.env
         echo "SUBNET1_ID=$SUBNET1_ID" >> deployment_vars.env
@@ -150,31 +150,47 @@ jobs:
       run: |
         source deployment_vars.env
         
-        # Create Application Load Balancer
-        ALB_ARN=$(aws elbv2 create-load-balancer \
-          --name choppertracker-alb \
-          --subnets $SUBNET1_ID $SUBNET2_ID \
-          --security-groups $ALB_SG_ID \
-          --scheme internet-facing \
-          --type application \
-          --ip-address-type ipv4 \
-          --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+        # Check if ALB already exists
+        ALB_ARN=$(aws elbv2 describe-load-balancers --names choppertracker-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "None")
+        
+        if [ "$ALB_ARN" = "None" ]; then
+          # Create Application Load Balancer
+          ALB_ARN=$(aws elbv2 create-load-balancer \
+            --name choppertracker-alb \
+            --subnets $SUBNET1_ID $SUBNET2_ID \
+            --security-groups $ALB_SG_ID \
+            --scheme internet-facing \
+            --type application \
+            --ip-address-type ipv4 \
+            --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+          echo "Created new ALB: $ALB_ARN"
+        else
+          echo "Using existing ALB: $ALB_ARN"
+        fi
         
         # Get ALB DNS name
         ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
         
-        # Create target group
-        TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
-          --name choppertracker-tg \
-          --protocol HTTP \
-          --port 80 \
-          --vpc-id $VPC_ID \
-          --target-type ip \
-          --health-check-path / \
-          --health-check-interval-seconds 30 \
-          --healthy-threshold-count 2 \
-          --unhealthy-threshold-count 5 \
-          --query 'TargetGroups[0].TargetGroupArn' --output text)
+        # Check if target group already exists
+        TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names choppertracker-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "None")
+        
+        if [ "$TARGET_GROUP_ARN" = "None" ]; then
+          # Create target group
+          TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+            --name choppertracker-tg \
+            --protocol HTTP \
+            --port 80 \
+            --vpc-id $VPC_ID \
+            --target-type ip \
+            --health-check-path / \
+            --health-check-interval-seconds 30 \
+            --healthy-threshold-count 2 \
+            --unhealthy-threshold-count 5 \
+            --query 'TargetGroups[0].TargetGroupArn' --output text)
+          echo "Created new target group: $TARGET_GROUP_ARN"
+        else
+          echo "Using existing target group: $TARGET_GROUP_ARN"
+        fi
         
         # Create HTTP listener
         aws elbv2 create-listener \
