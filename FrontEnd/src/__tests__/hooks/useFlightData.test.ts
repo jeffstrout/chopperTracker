@@ -2,6 +2,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useFlightData } from '../../hooks/useFlightData';
 import flightAPI from '../../services/api';
+import type { Aircraft, SystemStatus } from '../../services/types';
 
 // Mock the API module
 vi.mock('../../services/api', () => ({
@@ -35,19 +36,44 @@ describe('useFlightData', () => {
   });
 
   it('fetches flight data on mount', async () => {
-    const mockFlights = [
-      { hex: 'ABC123', lat: 32.5, lon: -95.5, flight: 'TEST001' },
-      { hex: 'DEF456', lat: 32.6, lon: -95.6, flight: 'TEST002' },
+    const mockFlights: Aircraft[] = [
+      { 
+        hex: 'ABC123', 
+        lat: 32.5, 
+        lon: -95.5, 
+        flight: 'TEST001',
+        on_ground: false,
+        seen: 5,
+        data_source: 'dump1090'
+      },
+      { 
+        hex: 'DEF456', 
+        lat: 32.6, 
+        lon: -95.6, 
+        flight: 'TEST002',
+        on_ground: false,
+        seen: 10,
+        data_source: 'dump1090'
+      },
     ];
 
     const mockRegions = {
       regions: [
-        { name: 'etex', lat: 32.5, lon: -95.5, radius_miles: 50 },
+        { 
+          name: 'etex',
+          enabled: true,
+          center: {
+            lat: 32.5,
+            lon: -95.5
+          },
+          radius_miles: 50,
+          collectors: []
+        },
       ],
       total_regions: 1,
     };
 
-    const mockStatus = {
+    const mockStatus: SystemStatus = {
       collectors: { total: 2, active: 2 },
       cache: { status: 'connected' },
       uptime_seconds: 1000,
@@ -80,7 +106,7 @@ describe('useFlightData', () => {
 
     vi.mocked(flightAPI.getFlights).mockRejectedValue(mockError);
     vi.mocked(flightAPI.getRegions).mockResolvedValue({ regions: [], total_regions: 0 });
-    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue(null);
+    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue({} as SystemStatus);
 
     const { result } = renderHook(() => useFlightData());
 
@@ -93,13 +119,20 @@ describe('useFlightData', () => {
   });
 
   it('auto-refreshes at specified interval', async () => {
-    const mockFlights = [{ hex: 'ABC123', lat: 32.5, lon: -95.5 }];
+    const mockFlights: Aircraft[] = [{ 
+      hex: 'ABC123', 
+      lat: 32.5, 
+      lon: -95.5,
+      on_ground: false,
+      seen: 5,
+      data_source: 'dump1090'
+    }];
     vi.mocked(flightAPI.getFlights).mockResolvedValue(mockFlights);
     vi.mocked(flightAPI.getRegions).mockResolvedValue({ regions: [], total_regions: 0 });
-    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue(null);
+    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue({} as SystemStatus);
 
     const { result } = renderHook(() => 
-      useFlightData({ autoRefresh: true, refreshInterval: 3000 })
+      useFlightData(true, 3000)
     );
 
     // Wait for initial load
@@ -120,12 +153,19 @@ describe('useFlightData', () => {
   });
 
   it('pauses refresh when tab is hidden', async () => {
-    const mockFlights = [{ hex: 'ABC123', lat: 32.5, lon: -95.5 }];
+    const mockFlights: Aircraft[] = [{ 
+      hex: 'ABC123', 
+      lat: 32.5, 
+      lon: -95.5,
+      on_ground: false,
+      seen: 5,
+      data_source: 'dump1090'
+    }];
     vi.mocked(flightAPI.getFlights).mockResolvedValue(mockFlights);
     vi.mocked(flightAPI.getRegions).mockResolvedValue({ regions: [], total_regions: 0 });
-    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue(null);
+    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue({} as SystemStatus);
 
-    renderHook(() => useFlightData({ autoRefresh: true, refreshInterval: 3000 }));
+    renderHook(() => useFlightData(true, 3000));
 
     // Wait for initial load
     await waitFor(() => {
@@ -165,10 +205,17 @@ describe('useFlightData', () => {
   });
 
   it('changes region and fetches new data', async () => {
-    const mockFlights = [{ hex: 'ABC123', lat: 32.5, lon: -95.5 }];
+    const mockFlights: Aircraft[] = [{ 
+      hex: 'ABC123', 
+      lat: 32.5, 
+      lon: -95.5,
+      on_ground: false,
+      seen: 5,
+      data_source: 'dump1090'
+    }];
     vi.mocked(flightAPI.getFlights).mockResolvedValue(mockFlights);
     vi.mocked(flightAPI.getRegions).mockResolvedValue({ regions: [], total_regions: 0 });
-    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue(null);
+    vi.mocked(flightAPI.getSystemStatus).mockResolvedValue({} as SystemStatus);
 
     const { result } = renderHook(() => useFlightData());
 

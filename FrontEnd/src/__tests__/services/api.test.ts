@@ -55,8 +55,8 @@ describe('FlightTrackerAPI', () => {
   describe('API methods', () => {
     it('getFlights returns aircraft array', async () => {
       const mockAircraft = [
-        { hex: 'ABC123', lat: 32.5, lon: -95.5 },
-        { hex: 'DEF456', lat: 32.6, lon: -95.6 },
+        { hex: 'ABC123', lat: 32.5, lon: -95.5, on_ground: false, seen: 5, data_source: 'dump1090' },
+        { hex: 'DEF456', lat: 32.6, lon: -95.6, on_ground: false, seen: 10, data_source: 'dump1090' },
       ];
       
       mockAxiosInstance.get.mockResolvedValue({ data: mockAircraft });
@@ -69,7 +69,7 @@ describe('FlightTrackerAPI', () => {
 
     it('getFlights handles object response with aircraft array', async () => {
       const mockAircraft = [
-        { hex: 'ABC123', lat: 32.5, lon: -95.5 },
+        { hex: 'ABC123', lat: 32.5, lon: -95.5, on_ground: false, seen: 5, data_source: 'dump1090' },
       ];
       
       mockAxiosInstance.get.mockResolvedValue({ 
@@ -83,7 +83,7 @@ describe('FlightTrackerAPI', () => {
 
     it('getHelicopters filters helicopter data', async () => {
       const mockHelicopters = [
-        { hex: 'HEL001', lat: 32.5, lon: -95.5, icao_aircraft_class: 'H1T' },
+        { hex: 'HEL001', lat: 32.5, lon: -95.5, icao_aircraft_class: 'H1T', on_ground: false, seen: 5, data_source: 'dump1090' },
       ];
       
       mockAxiosInstance.get.mockResolvedValue({ data: mockHelicopters });
