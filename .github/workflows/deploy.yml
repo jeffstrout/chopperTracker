@@ -94,11 +94,12 @@ jobs:
           aws lambda create-function \
             --function-name choppertracker-start \
             --runtime python3.11 \
-            --role arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
-            --handler src.main.start_handler \
+            --role "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role" \
+            --handler run.lambda_handler \
             --zip-file fileb://lambda-deployment.zip \
             --timeout 30 \
-            --memory-size 128
+            --memory-size 128 \
+            --description "ChopperTracker start function"
         fi
         
         # Function 2: choppertracker-stop  
@@ -112,11 +113,12 @@ jobs:
           aws lambda create-function \
             --function-name choppertracker-stop \
             --runtime python3.11 \
-            --role arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
-            --handler src.main.stop_handler \
+            --role "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role" \
+            --handler run.lambda_handler \
             --zip-file fileb://lambda-deployment.zip \
             --timeout 30 \
-            --memory-size 128
+            --memory-size 128 \
+            --description "ChopperTracker stop function"
         fi
 
     - name: Update CloudFront distribution
