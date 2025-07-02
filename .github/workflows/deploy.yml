@@ -81,19 +81,19 @@ jobs:
         cd BackEnd
         
         # Create a simple Lambda function file
-        cat > lambda_handler.py << 'EOF'
-import json
-
-def lambda_handler(event, context):
-    """Simple ChopperTracker Lambda function"""
-    return {
-        'statusCode': 200,
-        'body': json.dumps({
-            'message': 'ChopperTracker Lambda function deployed successfully',
-            'service': 'choppertracker'
-        })
-    }
-EOF
+        cat > lambda_handler.py << 'LAMBDA_EOF'
+        import json
+        
+        def lambda_handler(event, context):
+            """Simple ChopperTracker Lambda function"""
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'ChopperTracker Lambda function deployed successfully',
+                    'service': 'choppertracker'
+                })
+            }
+        LAMBDA_EOF
         
         # Package Lambda functions
         zip lambda-deployment.zip lambda_handler.py
