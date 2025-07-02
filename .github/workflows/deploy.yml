@@ -24,6 +24,18 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Verify AWS Account
+      run: |
+        echo "Current AWS Account:"
+        aws sts get-caller-identity
+        echo "Expected Account ID: ${{ env.AWS_ACCOUNT_ID }}"
+        CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        if [ "$CURRENT_ACCOUNT" != "${{ env.AWS_ACCOUNT_ID }}" ]; then
+          echo "ERROR: Wrong AWS account! Expected ${{ env.AWS_ACCOUNT_ID }}, got $CURRENT_ACCOUNT"
+          exit 1
+        fi
+        echo "✓ Confirmed deployment to ChopperTracker sub-account"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -78,63 +90,250 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Deploy backend API
+    - name: Deploy ECS Fargate Infrastructure
+      run: |
+        # Create VPC and networking
+        echo "Creating VPC infrastructure..."
+        VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query 'Vpc.VpcId' --output text)
+        aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=choppertracker-vpc
+        
+        # Enable DNS hostnames and resolution
+        aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames
+        aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support
+        
+        # Create Internet Gateway
+        IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
+        aws ec2 attach-internet-gateway --vpc-id $VPC_ID --internet-gateway-id $IGW_ID
+        aws ec2 create-tags --resources $IGW_ID --tags Key=Name,Value=choppertracker-igw
+        
+        # Create public subnets in different AZs
+        SUBNET1_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --query 'Subnet.SubnetId' --output text)
+        SUBNET2_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone us-east-1b --query 'Subnet.SubnetId' --output text)
+        
+        aws ec2 create-tags --resources $SUBNET1_ID --tags Key=Name,Value=choppertracker-subnet-1
+        aws ec2 create-tags --resources $SUBNET2_ID --tags Key=Name,Value=choppertracker-subnet-2
+        
+        # Enable auto-assign public IP
+        aws ec2 modify-subnet-attribute --subnet-id $SUBNET1_ID --map-public-ip-on-launch
+        aws ec2 modify-subnet-attribute --subnet-id $SUBNET2_ID --map-public-ip-on-launch
+        
+        # Create route table and routes
+        ROUTE_TABLE_ID=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+        aws ec2 create-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
+        aws ec2 associate-route-table --subnet-id $SUBNET1_ID --route-table-id $ROUTE_TABLE_ID
+        aws ec2 associate-route-table --subnet-id $SUBNET2_ID --route-table-id $ROUTE_TABLE_ID
+        
+        # Create security groups
+        ALB_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-alb-sg --description "ChopperTracker ALB Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        ECS_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-ecs-sg --description "ChopperTracker ECS Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        REDIS_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-redis-sg --description "ChopperTracker Redis Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        
+        # ALB security group rules (HTTP/HTTPS from anywhere)
+        aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0
+        aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0
+        
+        # ECS security group rules (from ALB only)
+        aws ec2 authorize-security-group-ingress --group-id $ECS_SG_ID --protocol tcp --port 8000 --source-group $ALB_SG_ID
+        
+        # Redis security group rules (from ECS only)
+        aws ec2 authorize-security-group-ingress --group-id $REDIS_SG_ID --protocol tcp --port 6379 --source-group $ECS_SG_ID
+        
+        echo "VPC_ID=$VPC_ID" >> deployment_vars.env
+        echo "SUBNET1_ID=$SUBNET1_ID" >> deployment_vars.env
+        echo "SUBNET2_ID=$SUBNET2_ID" >> deployment_vars.env
+        echo "ALB_SG_ID=$ALB_SG_ID" >> deployment_vars.env
+        echo "ECS_SG_ID=$ECS_SG_ID" >> deployment_vars.env
+        echo "REDIS_SG_ID=$REDIS_SG_ID" >> deployment_vars.env
+
+    - name: Deploy ElastiCache Redis
+      run: |
+        source deployment_vars.env
+        
+        # Create subnet group for Redis
+        aws elasticache create-cache-subnet-group \
+          --cache-subnet-group-name choppertracker-redis-subnet-group \
+          --cache-subnet-group-description "ChopperTracker Redis Subnet Group" \
+          --subnet-ids $SUBNET1_ID $SUBNET2_ID
+        
+        # Create Redis cluster
+        aws elasticache create-cache-cluster \
+          --cache-cluster-id choppertracker-redis \
+          --engine redis \
+          --cache-node-type cache.t3.micro \
+          --num-cache-nodes 1 \
+          --cache-subnet-group-name choppertracker-redis-subnet-group \
+          --security-group-ids $REDIS_SG_ID \
+          --tags Key=Name,Value=choppertracker-redis
+        
+        echo "Redis cluster creation initiated..."
+
+    - name: Build and Push Docker Image
       run: |
         cd BackEnd
         
-        # Install Mangum for FastAPI on Lambda
-        pip install mangum
+        # Create ECR repository
+        aws ecr create-repository --repository-name choppertracker-backend --region ${{ env.AWS_REGION }} || echo "Repository already exists"
         
-        # Create Lambda handler for FastAPI
-        cat > lambda_handler.py << 'LAMBDA_EOF'
-        from mangum import Mangum
-        from src.main import app
+        # Get ECR login token
+        aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
         
-        # Create the Mangum handler
-        handler = Mangum(app)
+        # Build Docker image
+        docker build -t choppertracker-backend .
         
-        def lambda_handler(event, context):
-            return handler(event, context)
-        LAMBDA_EOF
+        # Tag for ECR
+        docker tag choppertracker-backend:latest ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/choppertracker-backend:latest
         
-        # Package the full application
-        zip -r choppertracker-api.zip . -x "*.git*" -x "*__pycache__*" -x "*.pyc" -x "venv/*" -x "logs/*" -x "*.log"
+        # Push to ECR
+        docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/choppertracker-backend:latest
         
-        # Get the role ARN dynamically
-        ROLE_ARN=$(aws iam get-role --role-name lambda-execution-role --query 'Role.Arn' --output text)
-        echo "Using role ARN: $ROLE_ARN"
+        echo "ECR_IMAGE_URI=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/choppertracker-backend:latest" >> ../deployment_vars.env
+
+    - name: Deploy Application Load Balancer
+      run: |
+        source deployment_vars.env
         
-        # Deploy the main API function
-        if aws lambda get-function --function-name choppertracker-api >/dev/null 2>&1; then
-          echo "Function choppertracker-api exists, updating..."
-          aws lambda update-function-code \
-            --function-name choppertracker-api \
-            --zip-file fileb://choppertracker-api.zip
-        else
-          echo "Creating function choppertracker-api..."
-          aws lambda create-function \
-            --function-name choppertracker-api \
-            --runtime python3.11 \
-            --role "$ROLE_ARN" \
-            --handler lambda_handler.lambda_handler \
-            --zip-file fileb://choppertracker-api.zip \
-            --timeout 30 \
-            --memory-size 512 \
-            --description "ChopperTracker FastAPI Application" \
-            --environment Variables="{ENVIRONMENT=production,CONFIG_FILE=collectors.yaml}"
-        fi
+        # Create Application Load Balancer
+        ALB_ARN=$(aws elbv2 create-load-balancer \
+          --name choppertracker-alb \
+          --subnets $SUBNET1_ID $SUBNET2_ID \
+          --security-groups $ALB_SG_ID \
+          --scheme internet-facing \
+          --type application \
+          --ip-address-type ipv4 \
+          --query 'LoadBalancers[0].LoadBalancerArn' --output text)
         
-        # Create Function URL for direct access
-        aws lambda create-function-url-config \
-          --function-name choppertracker-api \
-          --auth-type NONE \
-          --cors AllowCredentials=false,AllowHeaders="*",AllowMethods="*",AllowOrigins="*" \
-          --invoke-mode BUFFERED \
-          2>/dev/null || echo "Function URL already exists"
+        # Get ALB DNS name
+        ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
         
-        # Get the Function URL
-        FUNCTION_URL=$(aws lambda get-function-url-config --function-name choppertracker-api --query 'FunctionUrl' --output text)
-        echo "ChopperTracker API deployed at: $FUNCTION_URL"
+        # Create target group
+        TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+          --name choppertracker-tg \
+          --protocol HTTP \
+          --port 8000 \
+          --vpc-id $VPC_ID \
+          --target-type ip \
+          --health-check-path /health \
+          --health-check-interval-seconds 30 \
+          --healthy-threshold-count 2 \
+          --unhealthy-threshold-count 5 \
+          --query 'TargetGroups[0].TargetGroupArn' --output text)
+        
+        # Create HTTP listener
+        aws elbv2 create-listener \
+          --load-balancer-arn $ALB_ARN \
+          --protocol HTTP \
+          --port 80 \
+          --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN
+        
+        echo "ALB_ARN=$ALB_ARN" >> deployment_vars.env
+        echo "ALB_DNS=$ALB_DNS" >> deployment_vars.env
+        echo "TARGET_GROUP_ARN=$TARGET_GROUP_ARN" >> deployment_vars.env
+        echo "Application Load Balancer created: $ALB_DNS"
+
+    - name: Deploy ECS Cluster and Service
+      run: |
+        source deployment_vars.env
+        
+        # Create ECS cluster
+        aws ecs create-cluster --cluster-name choppertracker-cluster --capacity-providers FARGATE_SPOT --default-capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1
+        
+        # Create execution role for ECS tasks
+        cat > task-execution-role-policy.json << 'EOF'
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+        EOF
+        
+        aws iam create-role \
+          --role-name choppertracker-task-execution-role \
+          --assume-role-policy-document file://task-execution-role-policy.json || echo "Role already exists"
+        
+        aws iam attach-role-policy \
+          --role-name choppertracker-task-execution-role \
+          --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        
+        # Get Redis endpoint
+        sleep 60 # Wait for Redis to be available
+        REDIS_ENDPOINT=$(aws elasticache describe-cache-clusters --cache-cluster-id choppertracker-redis --show-cache-node-info --query 'CacheClusters[0].CacheNodes[0].Endpoint.Address' --output text)
+        echo "Redis endpoint: $REDIS_ENDPOINT"
+        
+        # Create task definition
+        cat > task-definition.json << EOF
+        {
+          "family": "choppertracker-backend",
+          "networkMode": "awsvpc",
+          "requiresCompatibilities": ["FARGATE"],
+          "cpu": "256",
+          "memory": "512",
+          "executionRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/choppertracker-task-execution-role",
+          "containerDefinitions": [
+            {
+              "name": "web-api",
+              "image": "$ECR_IMAGE_URI",
+              "portMappings": [
+                {
+                  "containerPort": 8000,
+                  "protocol": "tcp"
+                }
+              ],
+              "essential": true,
+              "environment": [
+                {
+                  "name": "REDIS_HOST",
+                  "value": "$REDIS_ENDPOINT"
+                },
+                {
+                  "name": "REDIS_PORT",
+                  "value": "6379"
+                },
+                {
+                  "name": "ENVIRONMENT",
+                  "value": "production"
+                },
+                {
+                  "name": "CONFIG_FILE",
+                  "value": "collectors.yaml"
+                }
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/choppertracker",
+                  "awslogs-region": "${{ env.AWS_REGION }}",
+                  "awslogs-stream-prefix": "ecs"
+                }
+              }
+            }
+          ]
+        }
+        EOF
+        
+        # Create CloudWatch log group
+        aws logs create-log-group --log-group-name /ecs/choppertracker || echo "Log group already exists"
+        
+        # Register task definition
+        TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+        
+        # Create ECS service
+        aws ecs create-service \
+          --cluster choppertracker-cluster \
+          --service-name choppertracker-backend \
+          --task-definition choppertracker-backend \
+          --desired-count 1 \
+          --capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1 \
+          --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
+          --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=8000
+        
+        echo "ECS service deployed. ALB endpoint: http://$ALB_DNS"
 
     - name: Update CloudFront distribution
       run: |
