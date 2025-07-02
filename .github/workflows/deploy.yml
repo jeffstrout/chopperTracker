@@ -348,8 +348,11 @@ jobs:
         TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
         
         # Create or update ECS service
-        if ! aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].serviceName' --output text >/dev/null 2>&1; then
-          echo "Creating ECS service..."
+        echo "Checking if ECS service exists..."
+        SERVICE_STATUS=$(aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].status' --output text 2>/dev/null || echo "None")
+        
+        if [ "$SERVICE_STATUS" = "None" ] || [ "$SERVICE_STATUS" = "INACTIVE" ] || [ -z "$SERVICE_STATUS" ]; then
+          echo "Creating ECS service (status: $SERVICE_STATUS)..."
           aws ecs create-service \
             --cluster choppertracker-cluster \
             --service-name choppertracker-backend \
@@ -359,7 +362,7 @@ jobs:
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
             --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
         else
-          echo "Updating existing ECS service..."
+          echo "Updating existing ECS service (status: $SERVICE_STATUS)..."
           aws ecs update-service \
             --cluster choppertracker-cluster \
             --service choppertracker-backend \
