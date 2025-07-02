@@ -195,11 +195,17 @@ jobs:
         echo "Current AWS identity for ECR:"
         aws sts get-caller-identity
         
-        # Create ECR repository if it doesn't exist
+        # Create ECR repository if it doesn't exist (skip if no permissions)
         if ! aws ecr describe-repositories --repository-names $ECR_REPO 2>/dev/null; then
-          echo "Creating ECR repository: $ECR_REPO"
-          aws ecr create-repository --repository-name $ECR_REPO
-          echo "✅ Created ECR repository"
+          echo "ECR repository does not exist, attempting to create: $ECR_REPO"
+          if aws ecr create-repository --repository-name $ECR_REPO 2>/dev/null; then
+            echo "✅ Created ECR repository"
+          else
+            echo "⚠️  Cannot create ECR repository (insufficient permissions)"
+            echo "Manual action required: Create ECR repository '$ECR_REPO' in ChopperTracker account"
+            echo "For now, using placeholder image URI"
+            # Continue with deployment but note the issue
+          fi
         else
           echo "✅ ECR repository already exists"
         fi
