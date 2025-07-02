@@ -44,26 +44,20 @@ jobs:
         aws s3api head-bucket --bucket choppertracker-web-ui 2>/dev/null || \
         aws s3api create-bucket --bucket choppertracker-web-ui --region ${{ env.AWS_REGION }}
         
-        # Configure bucket policy for public access
-        aws s3api put-bucket-policy --bucket choppertracker-web-ui --policy '{
-          "Version": "2012-10-17",
-          "Statement": [{
-            "Sid": "PublicReadGetObject",
-            "Effect": "Allow",
-            "Principal": "*",
-            "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::choppertracker-web-ui/*"
-          }]
-        }'
+        # Disable block public access settings
+        aws s3api put-public-access-block \
+          --bucket choppertracker-web-ui \
+          --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
         
         # Enable static website hosting
         aws s3 website s3://choppertracker-web-ui \
           --index-document index.html \
           --error-document error.html
         
-        # Upload files
+        # Upload files with public-read ACL
         aws s3 sync ./FrontEnd/dist s3://choppertracker-web-ui \
           --delete \
+          --acl public-read \
           --cache-control "public, max-age=3600"
 
     - name: Setup Python
