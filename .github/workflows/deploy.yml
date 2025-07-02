@@ -397,15 +397,17 @@ jobs:
         # Get CloudFront distribution ID if exists
         DISTRIBUTION_ID=$(aws cloudfront list-distributions \
           --query "DistributionList.Items[?Comment=='ChopperTracker'].Id" \
-          --output text)
+          --output text 2>/dev/null || echo "")
         
-        if [ ! -z "$DISTRIBUTION_ID" ]; then
+        echo "CloudFront distribution search result: '$DISTRIBUTION_ID'"
+        
+        if [ ! -z "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ] && [ "$DISTRIBUTION_ID" != "null" ]; then
           echo "Creating CloudFront invalidation for distribution $DISTRIBUTION_ID"
           aws cloudfront create-invalidation \
             --distribution-id $DISTRIBUTION_ID \
             --paths "/*"
         else
-          echo "No CloudFront distribution found"
+          echo "No CloudFront distribution found (result: '$DISTRIBUTION_ID')"
         fi
 
     - name: Output deployment URL
