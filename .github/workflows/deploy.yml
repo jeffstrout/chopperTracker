@@ -81,6 +81,9 @@ jobs:
           echo "Bucket does not exist, creating it..."
           aws s3api create-bucket --bucket $BUCKET_NAME --region $AWS_REGION
           
+          # Remove public access block to allow public policies
+          aws s3api delete-public-access-block --bucket $BUCKET_NAME || echo "No public access block to remove"
+          
           # Configure for static website
           aws s3api put-bucket-website \
             --bucket $BUCKET_NAME \
