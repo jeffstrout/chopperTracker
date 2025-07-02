@@ -49,6 +49,11 @@ jobs:
           --bucket choppertracker-web-ui \
           --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
         
+        # Enable ACLs on the bucket (required for public access)
+        aws s3api put-bucket-ownership-controls \
+          --bucket choppertracker-web-ui \
+          --ownership-controls Rules=[{ObjectOwnership=BucketOwnerPreferred}]
+        
         # Enable static website hosting
         aws s3 website s3://choppertracker-web-ui \
           --index-document index.html \
