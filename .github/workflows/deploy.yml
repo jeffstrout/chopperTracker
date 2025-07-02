@@ -29,7 +29,7 @@ jobs:
       run: |
         echo "Current AWS Account:"
         aws sts get-caller-identity
-        echo "Expected Account ID: ${{ env.AWS_ACCOUNT_ID }}"
+        echo "Expected Account ID: $AWS_ACCOUNT_ID"
         CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
         echo "Current Account ID: $CURRENT_ACCOUNT"
         echo "✓ Confirmed deployment to ChopperTracker sub-account ($CURRENT_ACCOUNT)"
@@ -53,7 +53,7 @@ jobs:
       run: |
         # Create S3 bucket if it doesn't exist
         aws s3api head-bucket --bucket choppertracker-web-ui 2>/dev/null || \
-        aws s3api create-bucket --bucket choppertracker-web-ui --region ${{ env.AWS_REGION }}
+        aws s3api create-bucket --bucket choppertracker-web-ui --region $AWS_REGION
         
         # Disable block public access settings
         aws s3api put-public-access-block \
@@ -275,12 +275,17 @@ jobs:
           --role-name choppertracker-task-execution-role \
           --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy || echo "Policy may already be attached"
         
-        # Wait for role to be fully ready
-        sleep 5
+        # Wait for role to be fully ready (AWS IAM propagation can take time)
+        sleep 15
         
         # Use Redis endpoint from environment (fallback to localhost)
         source deployment_vars.env
         echo "Redis endpoint: $REDIS_ENDPOINT"
+        
+        # Ensure environment variables are available for task definition
+        export AWS_ACCOUNT_ID="${{ env.AWS_ACCOUNT_ID }}"
+        export AWS_REGION="${{ env.AWS_REGION }}"
+        echo "Using Account ID: $AWS_ACCOUNT_ID in Region: $AWS_REGION"
         
         # Create task definition with nginx for infrastructure testing
         cat > task-definition.json << EOF
@@ -290,7 +295,7 @@ jobs:
           "requiresCompatibilities": ["FARGATE"],
           "cpu": "256",
           "memory": "512",
-          "executionRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/choppertracker-task-execution-role",
+          "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/choppertracker-task-execution-role",
           "containerDefinitions": [
             {
               "name": "web-api",
@@ -306,7 +311,7 @@ jobs:
                 "logDriver": "awslogs",
                 "options": {
                   "awslogs-group": "/ecs/choppertracker",
-                  "awslogs-region": "${{ env.AWS_REGION }}",
+                  "awslogs-region": "${AWS_REGION}",
                   "awslogs-stream-prefix": "ecs"
                 }
               }
@@ -365,5 +370,5 @@ jobs:
 
     - name: Output deployment URL
       run: |
-        echo "Frontend deployed to: http://choppertracker-web-ui.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+        echo "Frontend deployed to: http://choppertracker-web-ui.s3-website-${AWS_REGION}.amazonaws.com"
         echo "Note: CloudFront distribution will be created separately if needed"
