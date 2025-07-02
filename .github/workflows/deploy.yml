@@ -204,8 +204,15 @@ jobs:
       run: |
         source deployment_vars.env
         
-        # Create ECS cluster
-        aws ecs create-cluster --cluster-name choppertracker-cluster --capacity-providers FARGATE_SPOT --default-capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1
+        # Ensure service-linked roles exist (ignore errors if they exist)
+        aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com || echo "ECS service-linked role already exists"
+        aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com || echo "ELB service-linked role already exists"
+        
+        # Create ECS cluster without capacity providers initially
+        aws ecs create-cluster --cluster-name choppertracker-cluster || echo "Cluster may already exist"
+        
+        # Wait for cluster to be ready
+        sleep 15
         
         # Create execution role for ECS tasks
         cat > task-execution-role-policy.json << 'EOF'
@@ -274,13 +281,13 @@ jobs:
         # Register task definition
         TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
         
-        # Create ECS service
+        # Create ECS service with basic Fargate (not Spot initially)
         aws ecs create-service \
           --cluster choppertracker-cluster \
           --service-name choppertracker-backend \
           --task-definition choppertracker-backend \
           --desired-count 1 \
-          --capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1 \
+          --launch-type FARGATE \
           --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
           --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
         
