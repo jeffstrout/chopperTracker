@@ -218,7 +218,7 @@ jobs:
         # Wait for cluster to be ready
         sleep 15
         
-        # Create execution role for ECS tasks
+        # Create execution role for ECS tasks with better error handling
         cat > task-execution-role-policy.json << 'EOF'
         {
           "Version": "2012-10-17",
@@ -234,13 +234,26 @@ jobs:
         }
         EOF
         
-        aws iam create-role \
-          --role-name choppertracker-task-execution-role \
-          --assume-role-policy-document file://task-execution-role-policy.json || echo "Role already exists"
+        # Check if role exists first
+        if aws iam get-role --role-name choppertracker-task-execution-role >/dev/null 2>&1; then
+          echo "ECS task execution role already exists"
+        else
+          echo "Creating ECS task execution role..."
+          aws iam create-role \
+            --role-name choppertracker-task-execution-role \
+            --assume-role-policy-document file://task-execution-role-policy.json
+          
+          # Wait for role to be available
+          sleep 10
+        fi
         
+        # Attach policy (idempotent operation)
         aws iam attach-role-policy \
           --role-name choppertracker-task-execution-role \
-          --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+          --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy || echo "Policy may already be attached"
+        
+        # Wait for role to be fully ready
+        sleep 5
         
         # Use Redis endpoint from environment (fallback to localhost)
         source deployment_vars.env
