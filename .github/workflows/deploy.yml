@@ -36,6 +36,8 @@ jobs:
 
     - name: Build frontend
       working-directory: ./FrontEnd
+      env:
+        VITE_API_BASE_URL: https://api.choppertracker.com
       run: npm run build
 
     - name: Deploy frontend to S3
