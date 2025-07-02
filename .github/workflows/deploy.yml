@@ -142,27 +142,14 @@ jobs:
         echo "ECS_SG_ID=$ECS_SG_ID" >> deployment_vars.env
         echo "REDIS_SG_ID=$REDIS_SG_ID" >> deployment_vars.env
 
-    - name: Deploy ElastiCache Redis
+    - name: Skip ElastiCache Redis (Permissions Issue)
       run: |
         source deployment_vars.env
         
-        # Create subnet group for Redis
-        aws elasticache create-cache-subnet-group \
-          --cache-subnet-group-name choppertracker-redis-subnet-group \
-          --cache-subnet-group-description "ChopperTracker Redis Subnet Group" \
-          --subnet-ids $SUBNET1_ID $SUBNET2_ID
-        
-        # Create Redis cluster
-        aws elasticache create-cache-cluster \
-          --cache-cluster-id choppertracker-redis \
-          --engine redis \
-          --cache-node-type cache.t3.micro \
-          --num-cache-nodes 1 \
-          --cache-subnet-group-name choppertracker-redis-subnet-group \
-          --security-group-ids $REDIS_SG_ID \
-          --tags Key=Name,Value=choppertracker-redis
-        
-        echo "Redis cluster creation initiated..."
+        # Skip Redis for now due to IAM permissions
+        # The application can fall back to in-memory storage
+        echo "REDIS_ENDPOINT=localhost" >> deployment_vars.env
+        echo "Skipping Redis creation due to IAM permissions - using in-memory fallback"
 
     - name: Build and Push Docker Image
       run: |
@@ -258,9 +245,8 @@ jobs:
           --role-name choppertracker-task-execution-role \
           --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
         
-        # Get Redis endpoint
-        sleep 60 # Wait for Redis to be available
-        REDIS_ENDPOINT=$(aws elasticache describe-cache-clusters --cache-cluster-id choppertracker-redis --show-cache-node-info --query 'CacheClusters[0].CacheNodes[0].Endpoint.Address' --output text)
+        # Use Redis endpoint from environment (fallback to localhost)
+        source deployment_vars.env
         echo "Redis endpoint: $REDIS_ENDPOINT"
         
         # Create task definition
