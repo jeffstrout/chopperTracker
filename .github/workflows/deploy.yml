@@ -33,8 +33,22 @@ jobs:
         aws sts get-caller-identity
         echo "Expected Account ID: $AWS_ACCOUNT_ID"
         CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        CURRENT_USER=$(aws sts get-caller-identity --query Arn --output text | cut -d'/' -f2)
         echo "Current Account ID: $CURRENT_ACCOUNT"
+        echo "Current User: $CURRENT_USER"
         echo "✓ Confirmed deployment to ChopperTracker sub-account ($CURRENT_ACCOUNT)"
+        
+        # Check what resources exist
+        echo ""
+        echo "Checking for existing resources in ChopperTracker account..."
+        echo "S3 Buckets:"
+        aws s3 ls 2>/dev/null | grep chopper || echo "  No choppertracker buckets found"
+        echo ""
+        echo "ECR Repositories:" 
+        aws ecr describe-repositories 2>/dev/null | jq -r '.repositories[].repositoryName' | grep chopper || echo "  No choppertracker repositories found"
+        echo ""
+        echo "ECS Clusters:"
+        aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -62,12 +76,39 @@ jobs:
         aws sts get-caller-identity
         echo "Using bucket: $BUCKET_NAME"
         
-        # Test bucket access first
-        echo "Testing bucket access..."
-        if aws s3 ls s3://$BUCKET_NAME/ --max-items 1; then
-          echo "Bucket access confirmed"
+        # Create bucket if it doesn't exist
+        if ! aws s3api head-bucket --bucket $BUCKET_NAME 2>/dev/null; then
+          echo "Bucket does not exist, creating it..."
+          aws s3api create-bucket --bucket $BUCKET_NAME --region $AWS_REGION
+          
+          # Configure for static website
+          aws s3api put-bucket-website \
+            --bucket $BUCKET_NAME \
+            --website-configuration '{
+              "IndexDocument": {"Suffix": "index.html"},
+              "ErrorDocument": {"Key": "error.html"}
+            }'
+          
+          # Set bucket policy for public read
+          aws s3api put-bucket-policy --bucket $BUCKET_NAME --policy '{
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Sid": "PublicReadGetObject",
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::'$BUCKET_NAME'/*"
+            }]
+          }'
+          
+          # Disable ACLs
+          aws s3api put-bucket-ownership-controls \
+            --bucket $BUCKET_NAME \
+            --ownership-controls 'Rules=[{ObjectOwnership=BucketOwnerEnforced}]'
+            
+          echo "✅ Created and configured S3 bucket"
         else
-          echo "Warning: Cannot list bucket contents, but will attempt upload"
+          echo "✅ Bucket already exists"
         fi
         
         # Upload files to existing bucket (without ACL since bucket doesn't support ACLs)
@@ -145,10 +186,20 @@ jobs:
       run: |
         cd BackEnd
         COMMIT_HASH=$(git rev-parse --short HEAD)
-        ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/choppertracker-backend"
+        ECR_REPO="choppertracker-backend"
+        ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPO}"
         
         echo "Current AWS identity for ECR:"
         aws sts get-caller-identity
+        
+        # Create ECR repository if it doesn't exist
+        if ! aws ecr describe-repositories --repository-names $ECR_REPO 2>/dev/null; then
+          echo "Creating ECR repository: $ECR_REPO"
+          aws ecr create-repository --repository-name $ECR_REPO
+          echo "✅ Created ECR repository"
+        else
+          echo "✅ ECR repository already exists"
+        fi
         
         # Login to ECR in ChopperTracker account
         echo "Logging into ECR..."
