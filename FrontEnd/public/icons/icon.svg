@@ -1,0 +1,11 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="100" fill="#3B82F6"/>
+  <g transform="translate(256, 256)">
+    <!-- Airplane icon centered and scaled up -->
+    <path d="M0 -120 L50 -20 L50 0 L20 10 L20 40 L10 45 L10 60 L-10 60 L-10 45 L-20 40 L-20 10 L-50 0 L-50 -20 Z" fill="white"/>
+    <!-- Wings -->
+    <rect x="-120" y="-30" width="240" height="40" rx="20" fill="white"/>
+    <!-- Tail -->
+    <path d="M-40 20 L-20 80 L20 80 L40 20 Z" fill="white"/>
+  </g>
+</svg>

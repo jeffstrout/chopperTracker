@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+  }
+}
+
+@layer components {
+  /* Leaflet map container */
+  .leaflet-container {
+    @apply h-full w-full;
+    z-index: 1 !important;
+    /* Safari-specific fixes for rendering issues */
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+  
+  /* Safari-specific fix for map tiles */
+  .leaflet-tile-container {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+  
+  /* Safari rendering optimization */
+  .leaflet-marker-icon,
+  .leaflet-marker-shadow {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+  
+  /* Ensure sidebar always appears above Leaflet */
+  .sidebar-overlay {
+    z-index: 9998 !important;
+  }
+  
+  .sidebar-panel {
+    z-index: 9999 !important;
+  }
+  
+  /* Custom aircraft markers */
+  .aircraft-marker {
+    @apply transform-gpu transition-transform duration-300 ease-out;
+  }
+  
+  /* Removed pulse animation to prevent fading */
+  .aircraft-marker.moving {
+    /* No animation */
+  }
+  
+  /* Helicopter rotor animation */
+  @keyframes rotate-blades {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  .helicopter-blades {
+    animation: rotate-blades 0.5s linear infinite;
+    transform-origin: center;
+  }
+  
+  /* Custom scrollbar */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.gray.400') transparent;
+    -webkit-overflow-scrolling: touch; /* Safari smooth scrolling */
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 rounded-full;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+  
+  /* Loading states */
+  .loading-skeleton {
+    @apply bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700;
+    background-size: 200% 100%;
+    animation: loading-shimmer 1.5s infinite;
+  }
+  
+  @keyframes loading-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+  
+  /* Button styles */
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+  
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600;
+  }
+  
+  .btn-ghost {
+    @apply text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:ring-gray-500 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700;
+  }
+  
+  /* Status indicators */
+  .status-indicator {
+    @apply w-2 h-2 rounded-full;
+  }
+  
+  .status-online {
+    @apply bg-green-500 animate-pulse;
+  }
+  
+  .status-offline {
+    @apply bg-red-500;
+  }
+  
+  .status-connecting {
+    @apply bg-yellow-500 animate-bounce-gentle;
+  }
+  
+  /* Version info styles */
+  .version-info {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    font-size: 11px;
+    opacity: 0.7;
+    z-index: 1000;
+  }
+  
+  .update-banner {
+    background: #4CAF50;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .update-banner button {
+    background: white;
+    color: #4CAF50;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  
+  .version-display {
+    background: rgba(0,0,0,0.1);
+    padding: 4px 8px;
+    border-radius: 3px;
+  }
+}

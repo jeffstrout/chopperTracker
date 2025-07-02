@@ -1,0 +1,186 @@
+# Flight Tracker Collector Configuration
+# Environment variables: ${VAR_NAME:-default_value}
+
+# Global settings
+global:
+  redis:
+    host: ${REDIS_HOST:-localhost}
+    port: ${REDIS_PORT:-6379}
+    db: ${REDIS_DB:-0}
+    key_expiry: 3600  # 1 hour TTL for flight data
+  
+  logging:
+    level: ${LOG_LEVEL:-INFO}
+    file: logs/flight_collector.log
+    rotate_time: "00:00"  # Midnight local time
+    backup_count: 7  # Keep 7 days of logs
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  polling:
+    dump1090_interval: 15  # seconds - frequent updates for local data
+    opensky_interval: 60   # seconds - conservative for API limits
+    retry_attempts: 3
+    timeout: 10
+    backoff_factor: 2  # Exponential backoff multiplier
+  
+  mcp:
+    enabled: ${MCP_ENABLED:-true}
+    server_name: "flight-tracker-mcp"
+    server_version: "1.0.0"
+    transport: "stdio"  # stdio or websocket
+    websocket:
+      host: ${MCP_HOST:-localhost}
+      port: ${MCP_PORT:-8001}
+    features:
+      tools: true
+      resources: true
+      prompts: true
+
+# Region definitions
+regions:
+  etex:
+    enabled: true
+    name: "East Texas"
+    timezone: "America/Chicago"
+    center:
+      lat: 32.3513  # Tyler, TX
+      lon: -95.3011
+    radius_miles: 150  # ~2.2 degrees, costs 1 credit per OpenSky request
+    collectors:
+      - type: "opensky"
+        enabled: true
+        url: "https://opensky-network.org/api/states/all"
+        anonymous: ${OPENSKY_ANONYMOUS:-true}
+        username: ${OPENSKY_USERNAME:-}
+        password: ${OPENSKY_PASSWORD:-}
+    
+    # Pi Station Forwarders - Remote ADS-B receivers
+    pi_stations:
+      enabled: true
+      api_keys:
+        - key: "etex.abc123def456ghi789jkl012"
+          name: "East Texas Pi Network - Primary"
+          description: "Primary API key for East Texas Pi stations"
+          created_at: "2025-06-20T10:00:00Z"
+          expires_at: "2026-06-20T10:00:00Z"
+          permissions: ["aircraft:write"]
+          rate_limits:
+            requests_per_minute: 1000
+            burst_allowance: 100
+          status: "active"
+        
+        - key: "etex.xyz789mno456pqr123stu890"
+          name: "East Texas Pi Network - Secondary"
+          description: "Secondary API key for additional Pi stations"
+          created_at: "2025-06-20T11:00:00Z"
+          expires_at: "2026-06-20T11:00:00Z"
+          permissions: ["aircraft:write"]
+          rate_limits:
+            requests_per_minute: 500
+            burst_allowance: 50
+          status: "active"
+        
+        - key: "etex.development123testing456"
+          name: "Development Key"
+          description: "Development API key - REMOVE IN PRODUCTION"
+          created_at: "2025-06-20T12:00:00Z"
+          expires_at: "2025-12-31T23:59:59Z"
+          permissions: ["aircraft:write"]
+          rate_limits:
+            requests_per_minute: 100
+            burst_allowance: 20
+          status: "active"
+
+# Airport database for destination estimation
+airports:
+  # Texas - Major airports around Tyler/East Texas
+  TYR:
+    name: "Tyler Pounds Regional"
+    lat: 32.3542
+    lon: -95.4024
+    icao: "KTYR"
+    
+  DFW:
+    name: "Dallas/Fort Worth International"
+    lat: 32.8998
+    lon: -97.0403
+    icao: "KDFW"
+    
+  DAL:
+    name: "Dallas Love Field"
+    lat: 32.8473
+    lon: -96.8517
+    icao: "KDAL"
+    
+  IAH:
+    name: "Houston George Bush Intercontinental"
+    lat: 29.9844
+    lon: -95.3414
+    icao: "KIAH"
+    
+  HOU:
+    name: "Houston William P. Hobby"
+    lat: 29.6454
+    lon: -95.2789
+    icao: "KHOU"
+    
+  AUS:
+    name: "Austin-Bergstrom International"
+    lat: 30.1945
+    lon: -97.6699
+    icao: "KAUS"
+    
+  SAT:
+    name: "San Antonio International"
+    lat: 29.5337
+    lon: -98.4698
+    icao: "KSAT"
+    
+  # Louisiana
+  MSY:
+    name: "New Orleans Louis Armstrong"
+    lat: 29.9931
+    lon: -90.2580
+    icao: "KMSY"
+    
+  # Arkansas
+  LIT:
+    name: "Little Rock National"
+    lat: 34.7294
+    lon: -92.2242
+    icao: "KLIT"
+
+# Collector type definitions
+collector_types:
+  opensky:
+    class: "OpenSkyCollector"
+    rate_limit: 100  # requests per minute
+    daily_credits_anonymous: 400
+    daily_credits_authenticated: 4000
+    credit_header: "X-Rate-Limit-Remaining"
+    
+  dump1090:
+    class: "Dump1090Collector"
+    rate_limit: 600  # 10 requests per second
+    local: true  # No external rate limiting
+
+# Helicopter identification patterns
+helicopter_patterns:
+  # Medical helicopters
+  - prefix: "N911"
+  - prefix: "LIFE"
+  - callsign_contains: ["MEDIC", "ANGEL", "STAR", "LIFE"]
+  
+  # Law enforcement
+  - prefix: "N120LA"  # LAPD pattern
+  - prefix: "N220LA"
+  - callsign_contains: ["POLICE", "SHERIFF"]
+  
+  # News helicopters
+  - callsign_contains: ["NEWS", "SKY", "CHOPPER"]
+  
+  # Military patterns
+  - icao_hex_prefix: ["AE"]  # US Military
+  
+  # General helicopter models (ICAO type codes)
+  - aircraft_type: ["H60", "EC30", "EC35", "EC45", "B407", "B429", "AS50", "R44", "R66"]

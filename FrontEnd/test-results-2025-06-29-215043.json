@@ -1,0 +1,103 @@
+{
+  "timestamp": "2025-06-30T02:50:43Z",
+  "environment": "production",
+  "tests": {
+    "aws_cli": {
+      "status": "PASS",
+      "details": "Available",
+      "time_ms": 0
+    },
+    "curl": {
+      "status": "PASS",
+      "details": "Available",
+      "time_ms": 0
+    },
+    "jq": {
+      "status": "PASS",
+      "details": "Available",
+      "time_ms": 0
+    },
+    "aws_credentials": {
+      "status": "PASS",
+      "details": "Account: 958933162000",
+      "time_ms": 2000
+    },
+    "ecs_service": {
+      "status": "PASS",
+      "details": "1/1 tasks running",
+      "time_ms": 0
+    },
+    "redis_cache": {
+      "status": "PASS",
+      "details": "Status: available",
+      "time_ms": 1000
+    },
+    "s3_bucket": {
+      "status": "PASS",
+      "details": "5 objects, 5.8 KiB",
+      "time_ms": 1000
+    },
+    "health_check": {
+      "status": "FAIL",
+      "details": "HTTP {"status"",
+      "time_ms": 0
+    },
+    "regions_endpoint": {
+      "status": "FAIL",
+      "details": "HTTP 429",
+      "time_ms": 0
+    },
+    "flights_endpoint": {
+      "status": "PASS",
+      "details": "5 aircraft found",
+      "time_ms": 0
+    },
+    "helicopters_endpoint": {
+      "status": "PASS",
+      "details": "5 helicopters found",
+      "time_ms": 0
+    },
+    "status_endpoint": {
+      "status": "FAIL",
+      "details": "HTTP {"detail"",
+      "time_ms": 0
+    },
+    "csv_export": {
+      "status": "PASS",
+      "details": "Tabular data available",
+      "time_ms": 1000
+    },
+    "domain_redirect": {
+      "status": "FAIL",
+      "details": "HTTP 405",
+      "time_ms": 0
+    },
+    "s3_website": {
+      "status": "FAIL",
+      "details": "HTTP </html>200",
+      "time_ms": 0
+    },
+    "cors_preflight": {
+      "status": "PASS",
+      "details": "HTTP 200, cross-origin enabled",
+      "time_ms": 0
+    },
+    "concurrent_requests": {
+      "status": "WARN",
+      "details": "0/5 successful",
+      "time_ms": 0
+    },
+    "data_freshness": {
+      "status": "WARN",
+      "details": "Cannot determine collection time",
+      "time_ms": 0
+    },
+  },
+  "summary": {
+    "passed": 11,
+    "failed": 5,
+    "warnings": 2,
+    "total": 18,
+    "duration_seconds": 5
+  }
+}
