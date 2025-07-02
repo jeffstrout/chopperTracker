@@ -347,12 +347,39 @@ jobs:
         echo "Registering task definition..."
         TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
         
-        # Create or update ECS service
+        # Create or update ECS service with robust error handling
         echo "Checking if ECS service exists..."
-        SERVICE_STATUS=$(aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].status' --output text 2>/dev/null || echo "None")
         
-        if [ "$SERVICE_STATUS" = "None" ] || [ "$SERVICE_STATUS" = "INACTIVE" ] || [ -z "$SERVICE_STATUS" ]; then
-          echo "Creating ECS service (status: $SERVICE_STATUS)..."
+        # Check service existence with proper error handling
+        if aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].serviceName' --output text 2>/dev/null | grep -q "choppertracker-backend"; then
+          echo "Service exists, checking status..."
+          SERVICE_STATUS=$(aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].status' --output text)
+          echo "Service status: $SERVICE_STATUS"
+          
+          if [ "$SERVICE_STATUS" = "ACTIVE" ]; then
+            echo "Updating existing active ECS service..."
+            aws ecs update-service \
+              --cluster choppertracker-cluster \
+              --service choppertracker-backend \
+              --task-definition choppertracker-backend
+          else
+            echo "Service exists but is not active (status: $SERVICE_STATUS), will recreate..."
+            # Delete the inactive service first
+            aws ecs delete-service --cluster choppertracker-cluster --service choppertracker-backend --force || echo "Failed to delete service, continuing..."
+            sleep 30
+            
+            echo "Creating new ECS service..."
+            aws ecs create-service \
+              --cluster choppertracker-cluster \
+              --service-name choppertracker-backend \
+              --task-definition choppertracker-backend \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
+              --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
+          fi
+        else
+          echo "Service does not exist, creating new ECS service..."
           aws ecs create-service \
             --cluster choppertracker-cluster \
             --service-name choppertracker-backend \
@@ -361,12 +388,6 @@ jobs:
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
             --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
-        else
-          echo "Updating existing ECS service (status: $SERVICE_STATUS)..."
-          aws ecs update-service \
-            --cluster choppertracker-cluster \
-            --service choppertracker-backend \
-            --task-definition choppertracker-backend
         fi
         
         echo "ECS service deployed. ALB endpoint: http://$ALB_DNS"
