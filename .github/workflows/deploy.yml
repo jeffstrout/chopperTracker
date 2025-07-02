@@ -51,27 +51,12 @@ jobs:
 
     - name: Deploy frontend to S3
       run: |
-        # Create S3 bucket if it doesn't exist
-        aws s3api head-bucket --bucket choppertracker-web-ui 2>/dev/null || \
-        aws s3api create-bucket --bucket choppertracker-web-ui --region $AWS_REGION
+        # Use existing S3 bucket
+        BUCKET_NAME="flight-tracker-web-ui-1750266711"
+        echo "Using existing S3 bucket: $BUCKET_NAME"
         
-        # Disable block public access settings
-        aws s3api put-public-access-block \
-          --bucket choppertracker-web-ui \
-          --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
-        
-        # Enable ACLs on the bucket (required for public access)
-        aws s3api put-bucket-ownership-controls \
-          --bucket choppertracker-web-ui \
-          --ownership-controls Rules=[{ObjectOwnership=BucketOwnerPreferred}]
-        
-        # Enable static website hosting
-        aws s3 website s3://choppertracker-web-ui \
-          --index-document index.html \
-          --error-document error.html
-        
-        # Upload files with public-read ACL
-        aws s3 sync ./FrontEnd/dist s3://choppertracker-web-ui \
+        # Upload files to existing bucket
+        aws s3 sync ./FrontEnd/dist s3://$BUCKET_NAME \
           --delete \
           --acl public-read \
           --cache-control "public, max-age=3600"
@@ -108,10 +93,10 @@ jobs:
         echo "Using VPC: $VPC_ID"
         echo "Using Subnets: $SUBNET1_ID, $SUBNET2_ID"
         
-        # Create or get existing security groups
-        ALB_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-alb-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || aws ec2 create-security-group --group-name choppertracker-alb-sg --description "ChopperTracker ALB Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
-        ECS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-ecs-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || aws ec2 create-security-group --group-name choppertracker-ecs-sg --description "ChopperTracker ECS Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
-        REDIS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-redis-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || aws ec2 create-security-group --group-name choppertracker-redis-sg --description "ChopperTracker Redis Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
+        # Use existing security groups
+        ALB_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=flight-tracker-alb-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
+        ECS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=flight-tracker-ecs-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
+        REDIS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=flight-tracker-redis-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
         
         # ALB security group rules (HTTP/HTTPS from anywhere) - ignore if rules already exist
         aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0 || echo "Port 80 rule may already exist"
@@ -139,19 +124,36 @@ jobs:
         echo "REDIS_ENDPOINT=localhost" >> deployment_vars.env
         echo "Skipping Redis creation due to IAM permissions - using in-memory fallback"
 
-    - name: Skip Docker Build (ECR Permissions Issue)
+    - name: Build and Push Docker Image
       run: |
-        # Skip Docker build due to ECR permissions
-        # We'll use a simple nginx image for initial infrastructure testing
-        echo "ECR_IMAGE_URI=nginx:latest" >> deployment_vars.env
-        echo "Skipping Docker build - using nginx:latest for infrastructure testing"
+        # Get ECR login token
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin 958933162000.dkr.ecr.us-east-1.amazonaws.com
+        
+        # Build Docker image with current commit hash
+        cd BackEnd
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        ECR_URI="958933162000.dkr.ecr.us-east-1.amazonaws.com/flight-tracker-backend"
+        
+        docker build \
+          --build-arg COMMIT_HASH=$COMMIT_HASH \
+          --build-arg BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+          -t $ECR_URI:latest \
+          -t $ECR_URI:$COMMIT_HASH \
+          .
+        
+        # Push to ECR
+        docker push $ECR_URI:latest
+        docker push $ECR_URI:$COMMIT_HASH
+        
+        echo "ECR_IMAGE_URI=$ECR_URI:latest" >> ../deployment_vars.env
+        echo "Built and pushed image: $ECR_URI:$COMMIT_HASH"
 
     - name: Deploy Application Load Balancer
       run: |
         source deployment_vars.env
         
-        # Check if ALB already exists
-        ALB_ARN=$(aws elbv2 describe-load-balancers --names choppertracker-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "None")
+        # Use existing ALB
+        ALB_ARN=$(aws elbv2 describe-load-balancers --names flight-tracker-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text)
         
         if [ "$ALB_ARN" = "None" ]; then
           # Create Application Load Balancer
@@ -171,8 +173,8 @@ jobs:
         # Get ALB DNS name
         ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
         
-        # Check if target group already exists
-        TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names choppertracker-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "None")
+        # Use existing target group
+        TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names flight-tracker-tg --query 'TargetGroups[0].TargetGroupArn' --output text)
         
         if [ "$TARGET_GROUP_ARN" = "None" ]; then
           # Create target group
@@ -230,13 +232,9 @@ jobs:
           echo "ELB service-linked role already exists"
         fi
         
-        # Create ECS cluster if it doesn't exist
-        if ! aws ecs describe-clusters --clusters choppertracker-cluster --query 'clusters[0].clusterName' --output text >/dev/null 2>&1; then
-          echo "Creating ECS cluster..."
-          aws ecs create-cluster --cluster-name choppertracker-cluster
-        else
-          echo "ECS cluster already exists"
-        fi
+        # Use existing ECS cluster
+        CLUSTER_NAME="flight-tracker-cluster"
+        echo "Using existing ECS cluster: $CLUSTER_NAME"
         
         # Wait for cluster to be ready
         sleep 15
@@ -257,23 +255,9 @@ jobs:
         }
         EOF
         
-        # Check if role exists first
-        if aws iam get-role --role-name choppertracker-task-execution-role >/dev/null 2>&1; then
-          echo "ECS task execution role already exists"
-        else
-          echo "Creating ECS task execution role..."
-          aws iam create-role \
-            --role-name choppertracker-task-execution-role \
-            --assume-role-policy-document file://task-execution-role-policy.json
-          
-          # Wait for role to be available
-          sleep 10
-        fi
-        
-        # Attach policy (idempotent operation)
-        aws iam attach-role-policy \
-          --role-name choppertracker-task-execution-role \
-          --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy || echo "Policy may already be attached"
+        # Use existing task execution role
+        TASK_ROLE_NAME="flight-tracker-task-execution-role"
+        echo "Using existing task execution role: $TASK_ROLE_NAME"
         
         # Wait for role to be fully ready (AWS IAM propagation can take time)
         sleep 15
@@ -287,10 +271,9 @@ jobs:
         export AWS_REGION="${{ env.AWS_REGION }}"
         echo "Using Account ID: $AWS_ACCOUNT_ID in Region: $AWS_REGION"
         
-        # Verify the role exists and get its ARN
-        ROLE_ARN=$(aws iam get-role --role-name choppertracker-task-execution-role --query 'Role.Arn' --output text)
-        echo "Expected role ARN: arn:aws:iam::${AWS_ACCOUNT_ID}:role/choppertracker-task-execution-role"
-        echo "Actual role ARN: $ROLE_ARN"
+        # Get existing role ARN
+        ROLE_ARN=$(aws iam get-role --role-name $TASK_ROLE_NAME --query 'Role.Arn' --output text)
+        echo "Using task execution role ARN: $ROLE_ARN"
         
         # Verify role exists
         if [ "$ROLE_ARN" = "None" ] || [ -z "$ROLE_ARN" ]; then
@@ -298,10 +281,10 @@ jobs:
           exit 1
         fi
         
-        # Create task definition with nginx for infrastructure testing
+        # Create task definition with updated application image
         cat > task-definition.json << EOF
         {
-          "family": "choppertracker-backend",
+          "family": "flight-tracker-backend",
           "networkMode": "awsvpc",
           "requiresCompatibilities": ["FARGATE"],
           "cpu": "256",
@@ -321,7 +304,7 @@ jobs:
               "logConfiguration": {
                 "logDriver": "awslogs",
                 "options": {
-                  "awslogs-group": "/ecs/choppertracker",
+                  "awslogs-group": "/ecs/flight-tracker",
                   "awslogs-region": "${AWS_REGION}",
                   "awslogs-stream-prefix": "ecs"
                 }
@@ -331,13 +314,9 @@ jobs:
         }
         EOF
         
-        # Create CloudWatch log group if it doesn't exist
-        if ! aws logs describe-log-groups --log-group-name-prefix /ecs/choppertracker --query 'logGroups[0].logGroupName' --output text >/dev/null 2>&1; then
-          echo "Creating CloudWatch log group..."
-          aws logs create-log-group --log-group-name /ecs/choppertracker
-        else
-          echo "CloudWatch log group already exists"
-        fi
+        # Use existing CloudWatch log group
+        LOG_GROUP_NAME="/ecs/flight-tracker"
+        echo "Using existing CloudWatch log group: $LOG_GROUP_NAME"
         
         # Debug: Show the generated task definition
         echo "Generated task definition:"
@@ -347,47 +326,21 @@ jobs:
         echo "Registering task definition..."
         TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
         
-        # Create or update ECS service with robust error handling
-        echo "Checking if ECS service exists..."
+        # Update existing ECS service
+        SERVICE_NAME="flight-tracker-backend"
+        echo "Updating existing ECS service: $SERVICE_NAME"
         
-        # Check service existence with proper error handling
-        if aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].serviceName' --output text 2>/dev/null | grep -q "choppertracker-backend"; then
+        # Check service existence
+        if aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query 'services[0].serviceName' --output text 2>/dev/null | grep -q "$SERVICE_NAME"; then
           echo "Service exists, checking status..."
-          SERVICE_STATUS=$(aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].status' --output text)
-          echo "Service status: $SERVICE_STATUS"
-          
-          if [ "$SERVICE_STATUS" = "ACTIVE" ]; then
-            echo "Updating existing active ECS service..."
-            aws ecs update-service \
-              --cluster choppertracker-cluster \
-              --service choppertracker-backend \
-              --task-definition choppertracker-backend
-          else
-            echo "Service exists but is not active (status: $SERVICE_STATUS), will recreate..."
-            # Delete the inactive service first
-            aws ecs delete-service --cluster choppertracker-cluster --service choppertracker-backend --force || echo "Failed to delete service, continuing..."
-            sleep 30
-            
-            echo "Creating new ECS service..."
-            aws ecs create-service \
-              --cluster choppertracker-cluster \
-              --service-name choppertracker-backend \
-              --task-definition choppertracker-backend \
-              --desired-count 1 \
-              --launch-type FARGATE \
-              --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
-              --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
-          fi
+          echo "Service exists, updating with new task definition..."
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition flight-tracker-backend
         else
-          echo "Service does not exist, creating new ECS service..."
-          aws ecs create-service \
-            --cluster choppertracker-cluster \
-            --service-name choppertracker-backend \
-            --task-definition choppertracker-backend \
-            --desired-count 1 \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
-            --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
+          echo "ERROR: Service $SERVICE_NAME not found in cluster $CLUSTER_NAME"
+          exit 1
         fi
         
         echo "ECS service deployed. ALB endpoint: http://$ALB_DNS"
@@ -412,5 +365,6 @@ jobs:
 
     - name: Output deployment URL
       run: |
-        echo "Frontend deployed to: http://choppertracker-web-ui.s3-website-${AWS_REGION}.amazonaws.com"
+        echo "Frontend deployed to: http://flight-tracker-web-ui-1750266711.s3-website-${AWS_REGION}.amazonaws.com"
+        echo "Backend API available at: http://flight-tracker-alb-790028972.us-east-1.elb.amazonaws.com"
         echo "Note: CloudFront distribution will be created separately if needed"
