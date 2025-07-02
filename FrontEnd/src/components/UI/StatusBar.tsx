@@ -8,7 +8,7 @@ import {
   WifiOff,
   AlertTriangle
 } from 'lucide-react';
-import type { Aircraft, SystemStatus } from '../../services/types';
+import type { Aircraft, SystemStatus, CollectorStatus } from '../../services/types';
 
 interface StatusBarProps {
   aircraft: Aircraft[];
@@ -141,15 +141,15 @@ const StatusBar: React.FC<StatusBarProps> = ({
                 Credits: 
               </span>
               <span className="font-mono text-gray-700 dark:text-gray-300">
-                {systemStatus.api_credits.opensky_remaining}
+                {systemStatus?.api_credits?.opensky_remaining}
               </span>
             </div>
           )}
 
           {/* Collectors status */}
-          {systemStatus?.collectors && (
+          {systemStatus?.collectors && typeof systemStatus.collectors === 'object' && !('total' in systemStatus.collectors) && (
             <div className="hidden xl:flex items-center space-x-2">
-              {Object.entries(systemStatus.collectors)
+              {Object.entries(systemStatus.collectors as Record<string, CollectorStatus>)
                 .filter(([name, status]) => name !== 'message' && typeof status === 'object' && status.status)
                 .map(([name, status]) => (
                 <div key={name} className="flex items-center space-x-1">

@@ -45,7 +45,7 @@ function App() {
     error, 
     lastUpdate,
     systemStatus 
-  } = useFlightData(uiState.autoRefresh, uiState.refreshInterval);
+  } = useFlightData(uiState.autoRefresh || true, uiState.refreshInterval || 3000);
   
   const { filters, filteredAircraft, setFilters } = useFilters(aircraft);
 

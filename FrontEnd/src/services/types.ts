@@ -56,15 +56,20 @@ export interface Region {
 
 // System status
 export interface SystemStatus {
-  status: 'healthy' | 'degraded' | 'offline';
-  collectors: Record<string, CollectorStatus>;
+  status?: 'healthy' | 'degraded' | 'offline';
+  collectors: Record<string, CollectorStatus> | { total: number; active: number; };
   api_credits?: {
     opensky_remaining?: number;
     opensky_limit?: number;
     opensky_reset_time?: string;
   };
-  uptime: number;
-  version: string;
+  cache?: {
+    status: string;
+  };
+  uptime?: number;
+  uptime_seconds?: number;
+  version?: string;
+  last_collection?: string;
 }
 
 export interface CollectorStatus {
