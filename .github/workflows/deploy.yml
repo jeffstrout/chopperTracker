@@ -55,11 +55,27 @@ jobs:
         BUCKET_NAME="flight-tracker-web-ui-1750266711"
         echo "Using existing S3 bucket: $BUCKET_NAME"
         
+        # Debug: Show current identity and test access
+        echo "Current AWS identity:"
+        aws sts get-caller-identity
+        echo "Using bucket: $BUCKET_NAME"
+        
+        # Test bucket access first
+        echo "Testing bucket access..."
+        if aws s3 ls s3://$BUCKET_NAME/ --max-items 1; then
+          echo "Bucket access confirmed"
+        else
+          echo "Warning: Cannot list bucket contents, but will attempt upload"
+        fi
+        
         # Upload files to existing bucket
+        echo "Uploading frontend files to S3..."
         aws s3 sync ./FrontEnd/dist s3://$BUCKET_NAME \
           --delete \
           --acl public-read \
-          --cache-control "public, max-age=3600"
+          --cache-control "public, max-age=3600" \
+          --cli-read-timeout 0 \
+          --cli-connect-timeout 60
 
     - name: Setup Python
       uses: actions/setup-python@v5
