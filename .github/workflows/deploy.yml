@@ -192,12 +192,19 @@ jobs:
           echo "Using existing target group: $TARGET_GROUP_ARN"
         fi
         
-        # Create HTTP listener
-        aws elbv2 create-listener \
-          --load-balancer-arn $ALB_ARN \
-          --protocol HTTP \
-          --port 80 \
-          --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN
+        # Create HTTP listener if it doesn't exist
+        LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[?Port==`80`].ListenerArn' --output text 2>/dev/null || echo "None")
+        
+        if [ "$LISTENER_ARN" = "None" ] || [ -z "$LISTENER_ARN" ]; then
+          echo "Creating HTTP listener..."
+          aws elbv2 create-listener \
+            --load-balancer-arn $ALB_ARN \
+            --protocol HTTP \
+            --port 80 \
+            --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN
+        else
+          echo "HTTP listener already exists: $LISTENER_ARN"
+        fi
         
         echo "ALB_ARN=$ALB_ARN" >> deployment_vars.env
         echo "ALB_DNS=$ALB_DNS" >> deployment_vars.env
@@ -208,12 +215,28 @@ jobs:
       run: |
         source deployment_vars.env
         
-        # Ensure service-linked roles exist (ignore errors if they exist)
-        aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com || echo "ECS service-linked role already exists"
-        aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com || echo "ELB service-linked role already exists"
+        # Ensure service-linked roles exist (check first, then create if needed)
+        if ! aws iam get-role --role-name AWSServiceRoleForECS >/dev/null 2>&1; then
+          echo "Creating ECS service-linked role..."
+          aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+        else
+          echo "ECS service-linked role already exists"
+        fi
         
-        # Create ECS cluster without capacity providers initially
-        aws ecs create-cluster --cluster-name choppertracker-cluster || echo "Cluster may already exist"
+        if ! aws iam get-role --role-name AWSServiceRoleForElasticLoadBalancing >/dev/null 2>&1; then
+          echo "Creating ELB service-linked role..."
+          aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com
+        else
+          echo "ELB service-linked role already exists"
+        fi
+        
+        # Create ECS cluster if it doesn't exist
+        if ! aws ecs describe-clusters --clusters choppertracker-cluster --query 'clusters[0].clusterName' --output text >/dev/null 2>&1; then
+          echo "Creating ECS cluster..."
+          aws ecs create-cluster --cluster-name choppertracker-cluster
+        else
+          echo "ECS cluster already exists"
+        fi
         
         # Wait for cluster to be ready
         sleep 15
@@ -292,21 +315,35 @@ jobs:
         }
         EOF
         
-        # Create CloudWatch log group
-        aws logs create-log-group --log-group-name /ecs/choppertracker || echo "Log group already exists"
+        # Create CloudWatch log group if it doesn't exist
+        if ! aws logs describe-log-groups --log-group-name-prefix /ecs/choppertracker --query 'logGroups[0].logGroupName' --output text >/dev/null 2>&1; then
+          echo "Creating CloudWatch log group..."
+          aws logs create-log-group --log-group-name /ecs/choppertracker
+        else
+          echo "CloudWatch log group already exists"
+        fi
         
         # Register task definition
         TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
         
-        # Create ECS service with basic Fargate (not Spot initially)
-        aws ecs create-service \
-          --cluster choppertracker-cluster \
-          --service-name choppertracker-backend \
-          --task-definition choppertracker-backend \
-          --desired-count 1 \
-          --launch-type FARGATE \
-          --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
-          --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
+        # Create or update ECS service
+        if ! aws ecs describe-services --cluster choppertracker-cluster --services choppertracker-backend --query 'services[0].serviceName' --output text >/dev/null 2>&1; then
+          echo "Creating ECS service..."
+          aws ecs create-service \
+            --cluster choppertracker-cluster \
+            --service-name choppertracker-backend \
+            --task-definition choppertracker-backend \
+            --desired-count 1 \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
+            --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80
+        else
+          echo "Updating existing ECS service..."
+          aws ecs update-service \
+            --cluster choppertracker-cluster \
+            --service choppertracker-backend \
+            --task-definition choppertracker-backend
+        fi
         
         echo "ECS service deployed. ALB endpoint: http://$ALB_DNS"
 
