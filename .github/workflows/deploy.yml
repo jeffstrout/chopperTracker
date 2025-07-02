@@ -78,70 +78,63 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Deploy backend Lambda functions
+    - name: Deploy backend API
       run: |
         cd BackEnd
         
-        # Create a simple Lambda function file
+        # Install Mangum for FastAPI on Lambda
+        pip install mangum
+        
+        # Create Lambda handler for FastAPI
         cat > lambda_handler.py << 'LAMBDA_EOF'
-        import json
+        from mangum import Mangum
+        from src.main import app
+        
+        # Create the Mangum handler
+        handler = Mangum(app)
         
         def lambda_handler(event, context):
-            """Simple ChopperTracker Lambda function"""
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'ChopperTracker Lambda function deployed successfully',
-                    'service': 'choppertracker'
-                })
-            }
+            return handler(event, context)
         LAMBDA_EOF
         
-        # Package Lambda functions
-        zip lambda-deployment.zip lambda_handler.py
+        # Package the full application
+        zip -r choppertracker-api.zip . -x "*.git*" -x "*__pycache__*" -x "*.pyc" -x "venv/*" -x "logs/*" -x "*.log"
         
         # Get the role ARN dynamically
         ROLE_ARN=$(aws iam get-role --role-name lambda-execution-role --query 'Role.Arn' --output text)
         echo "Using role ARN: $ROLE_ARN"
         
-        # Create Lambda functions (create first, then update if exists)
-        # Function 1: choppertracker-start
-        if aws lambda get-function --function-name choppertracker-start >/dev/null 2>&1; then
-          echo "Function choppertracker-start exists, updating..."
+        # Deploy the main API function
+        if aws lambda get-function --function-name choppertracker-api >/dev/null 2>&1; then
+          echo "Function choppertracker-api exists, updating..."
           aws lambda update-function-code \
-            --function-name choppertracker-start \
-            --zip-file fileb://lambda-deployment.zip
+            --function-name choppertracker-api \
+            --zip-file fileb://choppertracker-api.zip
         else
-          echo "Creating function choppertracker-start..."
+          echo "Creating function choppertracker-api..."
           aws lambda create-function \
-            --function-name choppertracker-start \
+            --function-name choppertracker-api \
             --runtime python3.11 \
             --role "$ROLE_ARN" \
             --handler lambda_handler.lambda_handler \
-            --zip-file fileb://lambda-deployment.zip \
+            --zip-file fileb://choppertracker-api.zip \
             --timeout 30 \
-            --memory-size 128 \
-            --description "ChopperTracker start function"
+            --memory-size 512 \
+            --description "ChopperTracker FastAPI Application" \
+            --environment Variables="{ENVIRONMENT=production,CONFIG_FILE=collectors.yaml}"
         fi
         
-        # Function 2: choppertracker-stop  
-        if aws lambda get-function --function-name choppertracker-stop >/dev/null 2>&1; then
-          echo "Function choppertracker-stop exists, updating..."
-          aws lambda update-function-code \
-            --function-name choppertracker-stop \
-            --zip-file fileb://lambda-deployment.zip
-        else
-          echo "Creating function choppertracker-stop..."
-          aws lambda create-function \
-            --function-name choppertracker-stop \
-            --runtime python3.11 \
-            --role "$ROLE_ARN" \
-            --handler lambda_handler.lambda_handler \
-            --zip-file fileb://lambda-deployment.zip \
-            --timeout 30 \
-            --memory-size 128 \
-            --description "ChopperTracker stop function"
-        fi
+        # Create Function URL for direct access
+        aws lambda create-function-url-config \
+          --function-name choppertracker-api \
+          --auth-type NONE \
+          --cors AllowCredentials=false,AllowHeaders="*",AllowMethods="*",AllowOrigins="*" \
+          --invoke-mode BUFFERED \
+          2>/dev/null || echo "Function URL already exists"
+        
+        # Get the Function URL
+        FUNCTION_URL=$(aws lambda get-function-url-config --function-name choppertracker-api --query 'FunctionUrl' --output text)
+        echo "ChopperTracker API deployed at: $FUNCTION_URL"
 
     - name: Update CloudFront distribution
       run: |
