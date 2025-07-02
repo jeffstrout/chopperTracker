@@ -287,6 +287,17 @@ jobs:
         export AWS_REGION="${{ env.AWS_REGION }}"
         echo "Using Account ID: $AWS_ACCOUNT_ID in Region: $AWS_REGION"
         
+        # Verify the role exists and get its ARN
+        ROLE_ARN=$(aws iam get-role --role-name choppertracker-task-execution-role --query 'Role.Arn' --output text)
+        echo "Expected role ARN: arn:aws:iam::${AWS_ACCOUNT_ID}:role/choppertracker-task-execution-role"
+        echo "Actual role ARN: $ROLE_ARN"
+        
+        # Verify role exists
+        if [ "$ROLE_ARN" = "None" ] || [ -z "$ROLE_ARN" ]; then
+          echo "ERROR: Role does not exist or is not accessible"
+          exit 1
+        fi
+        
         # Create task definition with nginx for infrastructure testing
         cat > task-definition.json << EOF
         {
@@ -295,7 +306,7 @@ jobs:
           "requiresCompatibilities": ["FARGATE"],
           "cpu": "256",
           "memory": "512",
-          "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/choppertracker-task-execution-role",
+          "executionRoleArn": "${ROLE_ARN}",
           "containerDefinitions": [
             {
               "name": "web-api",
@@ -328,7 +339,12 @@ jobs:
           echo "CloudWatch log group already exists"
         fi
         
+        # Debug: Show the generated task definition
+        echo "Generated task definition:"
+        cat task-definition.json
+        
         # Register task definition
+        echo "Registering task definition..."
         TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
         
         # Create or update ECS service
