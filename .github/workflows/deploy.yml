@@ -82,28 +82,42 @@ jobs:
         # Package Lambda functions
         zip -r lambda-deployment.zip . -x "*.git*" -x "*__pycache__*" -x "*.pyc"
         
-        # Create Lambda functions if they don't exist
-        aws lambda create-function \
-          --function-name choppertracker-start \
-          --runtime python3.11 \
-          --role arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
-          --handler handler.start_handler \
-          --zip-file fileb://lambda-deployment.zip \
-          2>/dev/null || \
-        aws lambda update-function-code \
-          --function-name choppertracker-start \
-          --zip-file fileb://lambda-deployment.zip
+        # Create Lambda functions (create first, then update if exists)
+        # Function 1: choppertracker-start
+        if aws lambda get-function --function-name choppertracker-start >/dev/null 2>&1; then
+          echo "Function choppertracker-start exists, updating..."
+          aws lambda update-function-code \
+            --function-name choppertracker-start \
+            --zip-file fileb://lambda-deployment.zip
+        else
+          echo "Creating function choppertracker-start..."
+          aws lambda create-function \
+            --function-name choppertracker-start \
+            --runtime python3.11 \
+            --role arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
+            --handler src.main.start_handler \
+            --zip-file fileb://lambda-deployment.zip \
+            --timeout 30 \
+            --memory-size 128
+        fi
         
-        aws lambda create-function \
-          --function-name choppertracker-stop \
-          --runtime python3.11 \
-          --role arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
-          --handler handler.stop_handler \
-          --zip-file fileb://lambda-deployment.zip \
-          2>/dev/null || \
-        aws lambda update-function-code \
-          --function-name choppertracker-stop \
-          --zip-file fileb://lambda-deployment.zip
+        # Function 2: choppertracker-stop  
+        if aws lambda get-function --function-name choppertracker-stop >/dev/null 2>&1; then
+          echo "Function choppertracker-stop exists, updating..."
+          aws lambda update-function-code \
+            --function-name choppertracker-stop \
+            --zip-file fileb://lambda-deployment.zip
+        else
+          echo "Creating function choppertracker-stop..."
+          aws lambda create-function \
+            --function-name choppertracker-stop \
+            --runtime python3.11 \
+            --role arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
+            --handler src.main.stop_handler \
+            --zip-file fileb://lambda-deployment.zip \
+            --timeout 30 \
+            --memory-size 128
+        fi
 
     - name: Update CloudFront distribution
       run: |
