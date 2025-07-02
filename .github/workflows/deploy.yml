@@ -89,36 +89,24 @@ jobs:
 
     - name: Deploy ECS Fargate Infrastructure
       run: |
-        # Create VPC and networking
-        echo "Creating VPC infrastructure..."
-        VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query 'Vpc.VpcId' --output text)
-        aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=choppertracker-vpc
+        # Use existing default VPC to avoid VPC limits
+        echo "Using existing default VPC..."
+        VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text)
         
-        # Enable DNS hostnames and resolution
-        aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames
-        aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support
+        # Get existing subnets in default VPC
+        SUBNET1_ID=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=availability-zone,Values=us-east-1a" --query 'Subnets[0].SubnetId' --output text)
+        SUBNET2_ID=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=availability-zone,Values=us-east-1b" --query 'Subnets[0].SubnetId' --output text)
         
-        # Create Internet Gateway
-        IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
-        aws ec2 attach-internet-gateway --vpc-id $VPC_ID --internet-gateway-id $IGW_ID
-        aws ec2 create-tags --resources $IGW_ID --tags Key=Name,Value=choppertracker-igw
+        # Fallback to any available subnets if specific AZs not found
+        if [ "$SUBNET1_ID" = "None" ] || [ "$SUBNET2_ID" = "None" ]; then
+          echo "Using any available subnets in default VPC..."
+          SUBNETS=($(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[].SubnetId' --output text))
+          SUBNET1_ID=${SUBNETS[0]}
+          SUBNET2_ID=${SUBNETS[1]:-${SUBNETS[0]}}
+        fi
         
-        # Create public subnets in different AZs
-        SUBNET1_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --query 'Subnet.SubnetId' --output text)
-        SUBNET2_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone us-east-1b --query 'Subnet.SubnetId' --output text)
-        
-        aws ec2 create-tags --resources $SUBNET1_ID --tags Key=Name,Value=choppertracker-subnet-1
-        aws ec2 create-tags --resources $SUBNET2_ID --tags Key=Name,Value=choppertracker-subnet-2
-        
-        # Enable auto-assign public IP
-        aws ec2 modify-subnet-attribute --subnet-id $SUBNET1_ID --map-public-ip-on-launch
-        aws ec2 modify-subnet-attribute --subnet-id $SUBNET2_ID --map-public-ip-on-launch
-        
-        # Create route table and routes
-        ROUTE_TABLE_ID=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
-        aws ec2 create-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
-        aws ec2 associate-route-table --subnet-id $SUBNET1_ID --route-table-id $ROUTE_TABLE_ID
-        aws ec2 associate-route-table --subnet-id $SUBNET2_ID --route-table-id $ROUTE_TABLE_ID
+        echo "Using VPC: $VPC_ID"
+        echo "Using Subnets: $SUBNET1_ID, $SUBNET2_ID"
         
         # Create security groups
         ALB_SG_ID=$(aws ec2 create-security-group --group-name choppertracker-alb-sg --description "ChopperTracker ALB Security Group" --vpc-id $VPC_ID --query 'GroupId' --output text)
