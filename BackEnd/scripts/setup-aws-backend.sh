@@ -164,15 +164,24 @@ cat > /tmp/trust-policy.json <<EOF
 }
 EOF
 
-TASK_EXEC_ROLE_ARN=$(aws iam create-role \
-    --role-name ${PROJECT_NAME}-task-execution-role \
-    --assume-role-policy-document file:///tmp/trust-policy.json \
-    --query 'Role.Arn' \
-    --output text 2>/dev/null || \
-    aws iam get-role \
-        --role-name ${PROJECT_NAME}-task-execution-role \
+TASK_EXEC_ROLE_NAME="${PROJECT_NAME}-task-execution-role"
+echo "Checking for IAM role: $TASK_EXEC_ROLE_NAME"
+TASK_EXEC_ROLE_ARN=$(aws iam get-role --role-name $TASK_EXEC_ROLE_NAME --query 'Role.Arn' --output text 2>/dev/null)
+
+if [ $? -ne 0 ]; then
+    echo "Role not found. Creating IAM role: $TASK_EXEC_ROLE_NAME"
+    TASK_EXEC_ROLE_ARN=$(aws iam create-role \
+        --role-name $TASK_EXEC_ROLE_NAME \
+        --assume-role-policy-document file:///tmp/trust-policy.json \
         --query 'Role.Arn' \
         --output text)
+else
+    echo "Role found. Updating trust policy for IAM role: $TASK_EXEC_ROLE_NAME"
+    aws iam update-assume-role-policy \
+        --role-name $TASK_EXEC_ROLE_NAME \
+        --policy-document file:///tmp/trust-policy.json
+fi
+
 
 # Attach policies
 aws iam attach-role-policy \
