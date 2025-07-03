@@ -50,6 +50,11 @@ jobs:
         echo "ECS Clusters:"
         aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
 
+    - name: Setup ECR Permissions
+      run: |
+        echo "🔐 Setting up ECR permissions for GitHub user..."
+        ./scripts/grant-ecr-token-permission.sh
+
     - name: Verify ECR Access
       run: |
         echo "🐳 Verifying ECR repository access..."
