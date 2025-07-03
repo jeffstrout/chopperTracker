@@ -8,7 +8,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: 958933162000  # Main account (where we have access)
+  AWS_ACCOUNT_ID: 038342322731  # ChopperTracker account
 
 jobs:
   deploy:
@@ -21,8 +21,8 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
     
     - name: Verify AWS Account
@@ -48,15 +48,22 @@ jobs:
         echo "ECS Clusters:"
         aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
 
-    - name: Verify ECR Access
+    - name: Setup ECR Repository
       run: |
-        echo "🐳 Verifying ECR repository access..."
-        ECR_URI="958933162000.dkr.ecr.us-east-1.amazonaws.com/choppertracker-backend"
-        echo "Using ECR repository: $ECR_URI"
+        echo "🐳 Setting up ECR repository..."
+        ECR_REPO="choppertracker-backend"
         
-        # Test ECR login with dedicated ECR user credentials
-        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 958933162000.dkr.ecr.us-east-1.amazonaws.com
-        echo "✅ ECR login successful"
+        # Create ECR repository if it doesn't exist
+        if ! aws ecr describe-repositories --repository-names $ECR_REPO 2>/dev/null; then
+          echo "Creating ECR repository: $ECR_REPO"
+          aws ecr create-repository --repository-name $ECR_REPO --region $AWS_REGION
+        else
+          echo "ECR repository already exists: $ECR_REPO"
+        fi
+        
+        # Test ECR login
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+        echo "✅ ECR setup complete"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
