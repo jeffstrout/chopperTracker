@@ -490,8 +490,7 @@ jobs:
           echo "Creating task execution role: $TASK_ROLE_NAME"
           
           # Create trust policy file
-          cat > task-execution-role-policy.json << 'EOF'
-          {
+          echo '{
             "Version": "2012-10-17",
             "Statement": [
               {
@@ -502,8 +501,7 @@ jobs:
                 "Action": "sts:AssumeRole"
               }
             ]
-          }
-          EOF
+          }' > task-execution-role-policy.json
           
           # Create the IAM role
           aws iam create-role \
