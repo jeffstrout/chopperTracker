@@ -574,7 +574,7 @@ jobs:
               "image": "$ECR_IMAGE_URI",
               "portMappings": [
                 {
-                  "containerPort": 80,
+                  "containerPort": 8000,
                   "protocol": "tcp"
                 }
               ],
@@ -626,7 +626,7 @@ jobs:
             --desired-count 1 \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
-            --load-balancers "targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80" \
+            --load-balancers "targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=8000" \
             --health-check-grace-period-seconds 60
             
           echo "✅ ECS service created successfully"
