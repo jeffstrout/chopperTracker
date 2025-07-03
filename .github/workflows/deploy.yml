@@ -454,28 +454,28 @@ jobs:
             --cluster-name $CLUSTER_NAME \
             --capacity-providers FARGATE \
             --default-capacity-provider-strategy capacityProvider=FARGATE,weight=1 \
-            --tags Key=Name,Value=$CLUSTER_NAME \
-                   Key=Project,Value=$PROJECT_TAG \
-                   Key=Environment,Value=$ENVIRONMENT_TAG \
-                   Key=Owner,Value=$OWNER_TAG \
-                   Key=Application,Value=$APPLICATION_TAG \
-                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
-                   Key=CostCenter,Value=$COST_CENTER_TAG \
-                   Key=Component,Value=Backend
+            --tags key=Name,value=$CLUSTER_NAME \
+                   key=Project,value=$PROJECT_TAG \
+                   key=Environment,value=$ENVIRONMENT_TAG \
+                   key=Owner,value=$OWNER_TAG \
+                   key=Application,value=$APPLICATION_TAG \
+                   key=ManagedBy,value=$MANAGED_BY_TAG \
+                   key=CostCenter,value=$COST_CENTER_TAG \
+                   key=Component,value=Backend
           echo "Created ECS cluster with ChopperTracker tagging"
         else
           echo "ECS cluster already exists: $CLUSTER_NAME"
           # Add tags to existing cluster
           CLUSTER_ARN="arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${CLUSTER_NAME}"
           aws ecs tag-resource --resource-arn $CLUSTER_ARN \
-            --tags Key=Name,Value=$CLUSTER_NAME \
-                   Key=Project,Value=$PROJECT_TAG \
-                   Key=Environment,Value=$ENVIRONMENT_TAG \
-                   Key=Owner,Value=$OWNER_TAG \
-                   Key=Application,Value=$APPLICATION_TAG \
-                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
-                   Key=CostCenter,Value=$COST_CENTER_TAG \
-                   Key=Component,Value=Backend
+            --tags key=Name,value=$CLUSTER_NAME \
+                   key=Project,value=$PROJECT_TAG \
+                   key=Environment,value=$ENVIRONMENT_TAG \
+                   key=Owner,value=$OWNER_TAG \
+                   key=Application,value=$APPLICATION_TAG \
+                   key=ManagedBy,value=$MANAGED_BY_TAG \
+                   key=CostCenter,value=$COST_CENTER_TAG \
+                   key=Component,value=Backend
         fi
         
         # Wait for cluster to be ready
