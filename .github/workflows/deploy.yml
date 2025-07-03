@@ -50,10 +50,16 @@ jobs:
         echo "ECS Clusters:"
         aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
 
-    - name: Create ECR Repository
+    - name: Verify ECR Access
       run: |
-        echo "🐳 Setting up ECR repository..."
-        ./scripts/create-ecr-repo-only.sh
+        echo "🐳 Verifying ECR repository access..."
+        # ECR repository is in main account (958933162000) with cross-account access
+        ECR_URI="958933162000.dkr.ecr.us-east-1.amazonaws.com/choppertracker-backend"
+        echo "Using ECR repository: $ECR_URI"
+        
+        # Test ECR login (this will test cross-account access)
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 958933162000.dkr.ecr.us-east-1.amazonaws.com
+        echo "✅ ECR login successful"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -195,29 +201,16 @@ jobs:
         cd BackEnd
         COMMIT_HASH=$(git rev-parse --short HEAD)
         ECR_REPO="choppertracker-backend"
-        ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPO}"
+        # Use main account ECR with cross-account access
+        ECR_URI="958933162000.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPO}"
         
         echo "Current AWS identity for ECR:"
         aws sts get-caller-identity
+        echo "Using cross-account ECR repository: $ECR_URI"
         
-        # Create ECR repository if it doesn't exist (skip if no permissions)
-        if ! aws ecr describe-repositories --repository-names $ECR_REPO 2>/dev/null; then
-          echo "ECR repository does not exist, attempting to create: $ECR_REPO"
-          if aws ecr create-repository --repository-name $ECR_REPO 2>/dev/null; then
-            echo "✅ Created ECR repository"
-          else
-            echo "⚠️  Cannot create ECR repository (insufficient permissions)"
-            echo "Manual action required: Create ECR repository '$ECR_REPO' in ChopperTracker account"
-            echo "For now, using placeholder image URI"
-            # Continue with deployment but note the issue
-          fi
-        else
-          echo "✅ ECR repository already exists"
-        fi
-        
-        # Login to ECR in ChopperTracker account
-        echo "Logging into ECR..."
-        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+        # Login to main account ECR using ChopperTracker credentials (cross-account access)
+        echo "Logging into main account ECR with cross-account access..."
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin 958933162000.dkr.ecr.us-east-1.amazonaws.com
           
           echo "Building Docker image..."
           docker build \
