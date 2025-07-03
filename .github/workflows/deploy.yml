@@ -8,7 +8,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: 038342322731  # ChopperTracker account
+  AWS_ACCOUNT_ID: "038342322731"  # ChopperTracker account
 
 jobs:
   deploy:
