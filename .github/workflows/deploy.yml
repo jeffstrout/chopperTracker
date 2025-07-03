@@ -415,15 +415,26 @@ jobs:
         
         # Check service existence
         if aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query 'services[0].serviceName' --output text 2>/dev/null | grep -q "$SERVICE_NAME"; then
-          echo "Service exists, checking status..."
           echo "Service exists, updating with new task definition..."
           aws ecs update-service \
             --cluster $CLUSTER_NAME \
             --service $SERVICE_NAME \
-            --task-definition flight-tracker-backend
+            --task-definition choppertracker-backend
         else
-          echo "ERROR: Service $SERVICE_NAME not found in cluster $CLUSTER_NAME"
-          exit 1
+          echo "Service $SERVICE_NAME not found, creating it..."
+          
+          # Create the service
+          aws ecs create-service \
+            --cluster $CLUSTER_NAME \
+            --service-name $SERVICE_NAME \
+            --task-definition choppertracker-backend \
+            --desired-count 1 \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1_ID,$SUBNET2_ID],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
+            --load-balancers "targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80" \
+            --health-check-grace-period-seconds 60
+            
+          echo "✅ ECS service created successfully"
         fi
         
         echo "ECS service deployed. ALB endpoint: http://$ALB_DNS"
