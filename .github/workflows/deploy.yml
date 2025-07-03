@@ -396,13 +396,10 @@ jobs:
           # Check if existing target group has wrong port (80 instead of 8000)
           EXISTING_PORT=$(aws elbv2 describe-target-groups --target-group-arns $TARGET_GROUP_ARN --query 'TargetGroups[0].Port' --output text)
           if [ "$EXISTING_PORT" = "80" ]; then
-            echo "⚠️  Existing target group has wrong port ($EXISTING_PORT), recreating with port 8000..."
-            # Delete the existing target group
-            aws elbv2 delete-target-group --target-group-arn $TARGET_GROUP_ARN
-            sleep 10
-            # Create new target group with correct port
-            TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
-              --name choppertracker-tg \
+            echo "⚠️  Existing target group has wrong port ($EXISTING_PORT), creating new one with port 8000..."
+            # Create new target group with different name first
+            NEW_TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+              --name choppertracker-tg-new \
               --protocol HTTP \
               --port 8000 \
               --vpc-id $VPC_ID \
@@ -411,7 +408,7 @@ jobs:
               --health-check-interval-seconds 30 \
               --healthy-threshold-count 2 \
               --unhealthy-threshold-count 5 \
-              --tags Key=Name,Value=choppertracker-tg \
+              --tags Key=Name,Value=choppertracker-tg-new \
                      Key=Project,Value=$PROJECT_TAG \
                      Key=Environment,Value=$ENVIRONMENT_TAG \
                      Key=Owner,Value=$OWNER_TAG \
@@ -420,7 +417,8 @@ jobs:
                      Key=CostCenter,Value=$COST_CENTER_TAG \
                      Key=Component,Value=LoadBalancer \
               --query 'TargetGroups[0].TargetGroupArn' --output text)
-            echo "✅ Recreated target group with port 8000: $TARGET_GROUP_ARN"
+            echo "✅ Created new target group with port 8000: $NEW_TARGET_GROUP_ARN"
+            TARGET_GROUP_ARN=$NEW_TARGET_GROUP_ARN
           else
             echo "✅ Existing target group already has correct port ($EXISTING_PORT)"
             # Add tags to existing target group
@@ -448,6 +446,21 @@ jobs:
             --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN
         else
           echo "HTTP listener already exists: $LISTENER_ARN"
+          # Update listener to use the correct target group
+          aws elbv2 modify-listener \
+            --listener-arn $LISTENER_ARN \
+            --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN
+          echo "✅ Updated listener to use target group: $TARGET_GROUP_ARN"
+        fi
+        
+        # Clean up old target group if we created a new one
+        if [ ! -z "$NEW_TARGET_GROUP_ARN" ]; then
+          echo "🧹 Cleaning up old target group with wrong port..."
+          OLD_TG_ARN=$(aws elbv2 describe-target-groups --names choppertracker-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "None")
+          if [ "$OLD_TG_ARN" != "None" ] && [ "$OLD_TG_ARN" != "$TARGET_GROUP_ARN" ]; then
+            aws elbv2 delete-target-group --target-group-arn $OLD_TG_ARN || echo "Failed to delete old target group (may still be in use)"
+            echo "🗑️  Deleted old target group: $OLD_TG_ARN"
+          fi
         fi
         
         echo "ALB_ARN=$ALB_ARN" >> deployment_vars.env
