@@ -50,19 +50,39 @@ jobs:
         echo "ECS Clusters:"
         aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
 
-    - name: Setup ECR Permissions
+    - name: Assume ECR Cross-Account Role
       run: |
-        echo "🔐 Setting up ECR permissions for GitHub user..."
-        ./scripts/grant-ecr-token-permission.sh
+        echo "🔑 Assuming cross-account role for ECR access..."
+        ROLE_ARN="arn:aws:iam::958933162000:role/ChopperTrackerECRAccess"
+        SESSION_NAME="choppertracker-ecr-access-$(date +%s)"
+        
+        # Assume the role and get temporary credentials
+        CREDS=$(aws sts assume-role --role-arn $ROLE_ARN --role-session-name $SESSION_NAME --output json)
+        
+        # Extract credentials
+        export AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')
+        export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')
+        export AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')
+        
+        # Save credentials for next steps
+        echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> ecr_creds.env
+        echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> ecr_creds.env
+        echo "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN" >> ecr_creds.env
+        
+        # Verify the assumed role
+        aws sts get-caller-identity
+        echo "✅ Successfully assumed ECR access role"
 
     - name: Verify ECR Access
       run: |
         echo "🐳 Verifying ECR repository access..."
-        # ECR repository is in main account (958933162000) with cross-account access
+        # Load ECR credentials
+        source ecr_creds.env
+        
         ECR_URI="958933162000.dkr.ecr.us-east-1.amazonaws.com/choppertracker-backend"
         echo "Using ECR repository: $ECR_URI"
         
-        # Test ECR login (this will test cross-account access)
+        # Test ECR login with assumed role credentials
         aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 958933162000.dkr.ecr.us-east-1.amazonaws.com
         echo "✅ ECR login successful"
 
@@ -204,6 +224,9 @@ jobs:
     - name: Build and Push Docker Image
       run: |
         cd BackEnd
+        # Load ECR credentials from assumed role
+        source ../ecr_creds.env
+        
         COMMIT_HASH=$(git rev-parse --short HEAD)
         ECR_REPO="choppertracker-backend"
         # Use main account ECR with cross-account access
@@ -213,8 +236,8 @@ jobs:
         aws sts get-caller-identity
         echo "Using cross-account ECR repository: $ECR_URI"
         
-        # Login to main account ECR using ChopperTracker credentials (cross-account access)
-        echo "Logging into main account ECR with cross-account access..."
+        # Login to main account ECR using assumed role credentials
+        echo "Logging into main account ECR with assumed role credentials..."
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin 958933162000.dkr.ecr.us-east-1.amazonaws.com
           
           echo "Building Docker image..."
