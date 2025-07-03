@@ -63,7 +63,7 @@ cat > /tmp/task-definition.json <<EOF
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 8000,
+          "containerPort": 80,
           "protocol": "tcp"
         }
       ],
@@ -90,7 +90,7 @@ cat > /tmp/task-definition.json <<EOF
         }
       ],
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/status || exit 1"],
+        "command": ["CMD-SHELL", "curl -f http://localhost:80/api/v1/status || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -109,7 +109,7 @@ cat > /tmp/task-definition.json <<EOF
       "name": "collector",
       "image": "$ECR_REPO_URI:latest",
       "essential": true,
-      "command": ["python", "-m", "src.main"],
+      "command": ["/app/scripts/start_with_db.sh", "python", "-m", "src.cli"],
       "environment": [
         {
           "name": "REDIS_HOST",
@@ -177,7 +177,7 @@ else
         --desired-count 1 \
         --launch-type FARGATE \
         --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
-        --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=8000 \
+        --load-balancers targetGroupArn=$TARGET_GROUP_ARN,containerName=web-api,containerPort=80 \
         --health-check-grace-period-seconds 60
 fi
 
