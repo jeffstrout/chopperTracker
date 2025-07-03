@@ -50,6 +50,11 @@ jobs:
         echo "ECS Clusters:"
         aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
 
+    - name: Create ECR Repository
+      run: |
+        echo "🐳 Setting up ECR repository..."
+        ./scripts/create-ecr-repo-only.sh
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
