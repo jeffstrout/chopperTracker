@@ -8,7 +8,15 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: "038342322731"  # ChopperTracker account
+  AWS_ACCOUNT_ID: "958933162000"  # Main account - ChopperTracker resources tagged for cost tracking
+  
+  # Tagging for cost tracking and resource management
+  PROJECT_TAG: "ChopperTracker"
+  ENVIRONMENT_TAG: "Production"
+  OWNER_TAG: "ChopperTracker"
+  APPLICATION_TAG: "flight-tracking"
+  MANAGED_BY_TAG: "GitHub-Actions"
+  COST_CENTER_TAG: "ChopperTracker"
 
 jobs:
   deploy:
@@ -25,7 +33,7 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
     
-    - name: Verify AWS Account
+    - name: Verify AWS Account and Check Existing Resources
       run: |
         echo "Current AWS Account:"
         aws sts get-caller-identity
@@ -34,11 +42,11 @@ jobs:
         CURRENT_USER=$(aws sts get-caller-identity --query Arn --output text | cut -d'/' -f2)
         echo "Current Account ID: $CURRENT_ACCOUNT"
         echo "Current User: $CURRENT_USER"
-        echo "✓ Confirmed deployment to ChopperTracker sub-account ($CURRENT_ACCOUNT)"
+        echo "✓ Confirmed deployment to main account with ChopperTracker tagging ($CURRENT_ACCOUNT)"
         
-        # Check what resources exist
+        # Check what ChopperTracker resources exist
         echo ""
-        echo "Checking for existing resources in ChopperTracker account..."
+        echo "Checking for existing ChopperTracker resources in main account..."
         echo "S3 Buckets:"
         aws s3 ls 2>/dev/null | grep chopper || echo "  No choppertracker buckets found"
         echo ""
@@ -47,23 +55,43 @@ jobs:
         echo ""
         echo "ECS Clusters:"
         aws ecs list-clusters 2>/dev/null | jq -r '.clusterArns[]' | grep chopper || echo "  No choppertracker clusters found"
+        echo ""
+        echo "Load Balancers:"
+        aws elbv2 describe-load-balancers 2>/dev/null | jq -r '.LoadBalancers[].LoadBalancerName' | grep chopper || echo "  No choppertracker load balancers found"
 
     - name: Setup ECR Repository
       run: |
-        echo "🐳 Setting up ECR repository..."
+        echo "🐳 Setting up ECR repository with tagging..."
         ECR_REPO="choppertracker-backend"
         
         # Create ECR repository if it doesn't exist
         if ! aws ecr describe-repositories --repository-names $ECR_REPO 2>/dev/null; then
           echo "Creating ECR repository: $ECR_REPO"
-          aws ecr create-repository --repository-name $ECR_REPO --region $AWS_REGION
+          aws ecr create-repository \
+            --repository-name $ECR_REPO \
+            --region $AWS_REGION \
+            --tags Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG
         else
           echo "ECR repository already exists: $ECR_REPO"
+          # Add tags to existing repository
+          aws ecr tag-resource \
+            --resource-arn "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${ECR_REPO}" \
+            --tags Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG
         fi
         
         # Test ECR login
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-        echo "✅ ECR setup complete"
+        echo "✅ ECR setup complete with ChopperTracker tagging"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -82,7 +110,7 @@ jobs:
 
     - name: Deploy frontend to S3
       run: |
-        # Use ChopperTracker S3 bucket
+        # Use ChopperTracker S3 bucket with proper tagging
         BUCKET_NAME="choppertracker-frontend"
         echo "Using S3 bucket: $BUCKET_NAME"
         
@@ -93,8 +121,20 @@ jobs:
         
         # Create bucket if it doesn't exist
         if ! aws s3api head-bucket --bucket $BUCKET_NAME 2>/dev/null; then
-          echo "Bucket does not exist, creating it..."
+          echo "Bucket does not exist, creating it with ChopperTracker tagging..."
           aws s3api create-bucket --bucket $BUCKET_NAME --region $AWS_REGION
+          
+          # Add comprehensive tags to S3 bucket
+          aws s3api put-bucket-tagging --bucket $BUCKET_NAME --tagging \
+            'TagSet=[
+              {Key=Project,Value='$PROJECT_TAG'},
+              {Key=Environment,Value='$ENVIRONMENT_TAG'},
+              {Key=Owner,Value='$OWNER_TAG'},
+              {Key=Application,Value='$APPLICATION_TAG'},
+              {Key=ManagedBy,Value='$MANAGED_BY_TAG'},
+              {Key=CostCenter,Value='$COST_CENTER_TAG'},
+              {Key=Component,Value=Frontend}
+            ]'
           
           # Remove public access block to allow public policies
           aws s3api delete-public-access-block --bucket $BUCKET_NAME || echo "No public access block to remove"
@@ -124,12 +164,23 @@ jobs:
             --bucket $BUCKET_NAME \
             --ownership-controls 'Rules=[{ObjectOwnership=BucketOwnerEnforced}]'
             
-          echo "✅ Created and configured S3 bucket"
+          echo "✅ Created and configured S3 bucket with ChopperTracker tagging"
         else
-          echo "✅ Bucket already exists"
+          echo "✅ Bucket already exists, ensuring proper tagging..."
+          # Add tags to existing bucket
+          aws s3api put-bucket-tagging --bucket $BUCKET_NAME --tagging \
+            'TagSet=[
+              {Key=Project,Value='$PROJECT_TAG'},
+              {Key=Environment,Value='$ENVIRONMENT_TAG'},
+              {Key=Owner,Value='$OWNER_TAG'},
+              {Key=Application,Value='$APPLICATION_TAG'},
+              {Key=ManagedBy,Value='$MANAGED_BY_TAG'},
+              {Key=CostCenter,Value='$COST_CENTER_TAG'},
+              {Key=Component,Value=Frontend}
+            ]'
         fi
         
-        # Upload files to existing bucket (without ACL since bucket doesn't support ACLs)
+        # Upload files to bucket
         echo "Uploading frontend files to S3..."
         aws s3 sync ./FrontEnd/dist s3://$BUCKET_NAME \
           --delete \
@@ -169,10 +220,54 @@ jobs:
         echo "Using VPC: $VPC_ID"
         echo "Using Subnets: $SUBNET1_ID, $SUBNET2_ID"
         
-        # Use ChopperTracker security groups
-        ALB_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-alb-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
-        ECS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-ecs-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
-        REDIS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-redis-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text || echo "")
+        # Create or get ChopperTracker security groups with proper tagging
+        echo "Setting up ChopperTracker security groups with tagging..."
+        
+        # ALB Security Group
+        ALB_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-alb-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "None")
+        if [ "$ALB_SG_ID" = "None" ]; then
+          ALB_SG_ID=$(aws ec2 create-security-group \
+            --group-name choppertracker-alb-sg \
+            --description "ChopperTracker Application Load Balancer Security Group" \
+            --vpc-id $VPC_ID \
+            --tag-specifications 'ResourceType=security-group,Tags=[
+              {Key=Name,Value=choppertracker-alb-sg},
+              {Key=Project,Value='$PROJECT_TAG'},
+              {Key=Environment,Value='$ENVIRONMENT_TAG'},
+              {Key=Owner,Value='$OWNER_TAG'},
+              {Key=Application,Value='$APPLICATION_TAG'},
+              {Key=ManagedBy,Value='$MANAGED_BY_TAG'},
+              {Key=CostCenter,Value='$COST_CENTER_TAG'},
+              {Key=Component,Value=LoadBalancer}
+            ]' \
+            --query 'GroupId' --output text)
+          echo "Created ALB security group: $ALB_SG_ID"
+        else
+          echo "ALB security group already exists: $ALB_SG_ID"
+        fi
+        
+        # ECS Security Group  
+        ECS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=choppertracker-ecs-sg" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "None")
+        if [ "$ECS_SG_ID" = "None" ]; then
+          ECS_SG_ID=$(aws ec2 create-security-group \
+            --group-name choppertracker-ecs-sg \
+            --description "ChopperTracker ECS Tasks Security Group" \
+            --vpc-id $VPC_ID \
+            --tag-specifications 'ResourceType=security-group,Tags=[
+              {Key=Name,Value=choppertracker-ecs-sg},
+              {Key=Project,Value='$PROJECT_TAG'},
+              {Key=Environment,Value='$ENVIRONMENT_TAG'},
+              {Key=Owner,Value='$OWNER_TAG'},
+              {Key=Application,Value='$APPLICATION_TAG'},
+              {Key=ManagedBy,Value='$MANAGED_BY_TAG'},
+              {Key=CostCenter,Value='$COST_CENTER_TAG'},
+              {Key=Component,Value=Backend}
+            ]' \
+            --query 'GroupId' --output text)
+          echo "Created ECS security group: $ECS_SG_ID"
+        else
+          echo "ECS security group already exists: $ECS_SG_ID"
+        fi
         
         # ALB security group rules (HTTP/HTTPS from anywhere) - ignore if rules already exist
         aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0 || echo "Port 80 rule may already exist"
@@ -180,9 +275,6 @@ jobs:
         
         # ECS security group rules (from ALB only) - ignore if rules already exist
         aws ec2 authorize-security-group-ingress --group-id $ECS_SG_ID --protocol tcp --port 80 --source-group $ALB_SG_ID || echo "ECS port 80 rule may already exist"
-        
-        # Redis security group rules (from ECS only) - ignore if rules already exist
-        aws ec2 authorize-security-group-ingress --group-id $REDIS_SG_ID --protocol tcp --port 6379 --source-group $ECS_SG_ID || echo "Redis port 6379 rule may already exist"
         
         echo "VPC_ID=$VPC_ID" >> deployment_vars.env
         echo "SUBNET1_ID=$SUBNET1_ID" >> deployment_vars.env
@@ -235,11 +327,11 @@ jobs:
       run: |
         source deployment_vars.env
         
-        # Use ChopperTracker ALB
-        ALB_ARN=$(aws elbv2 describe-load-balancers --names choppertracker-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+        # Create or get ChopperTracker ALB with proper tagging
+        ALB_ARN=$(aws elbv2 describe-load-balancers --names choppertracker-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "None")
         
         if [ "$ALB_ARN" = "None" ]; then
-          # Create Application Load Balancer
+          # Create Application Load Balancer with tags
           ALB_ARN=$(aws elbv2 create-load-balancer \
             --name choppertracker-alb \
             --subnets $SUBNET1_ID $SUBNET2_ID \
@@ -247,34 +339,70 @@ jobs:
             --scheme internet-facing \
             --type application \
             --ip-address-type ipv4 \
+            --tags Key=Name,Value=choppertracker-alb \
+                   Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG \
+                   Key=Component,Value=LoadBalancer \
             --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-          echo "Created new ALB: $ALB_ARN"
+          echo "Created new ALB with ChopperTracker tagging: $ALB_ARN"
         else
           echo "Using existing ALB: $ALB_ARN"
+          # Add tags to existing ALB
+          aws elbv2 add-tags --resource-arns $ALB_ARN \
+            --tags Key=Name,Value=choppertracker-alb \
+                   Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG \
+                   Key=Component,Value=LoadBalancer
         fi
         
         # Get ALB DNS name
         ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
         
-        # Use ChopperTracker target group
-        TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names choppertracker-tg --query 'TargetGroups[0].TargetGroupArn' --output text)
+        # Create or get ChopperTracker target group with proper tagging
+        TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups --names choppertracker-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "None")
         
         if [ "$TARGET_GROUP_ARN" = "None" ]; then
-          # Create target group
+          # Create target group with tags
           TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
             --name choppertracker-tg \
             --protocol HTTP \
             --port 80 \
             --vpc-id $VPC_ID \
             --target-type ip \
-            --health-check-path / \
+            --health-check-path /health \
             --health-check-interval-seconds 30 \
             --healthy-threshold-count 2 \
             --unhealthy-threshold-count 5 \
+            --tags Key=Name,Value=choppertracker-tg \
+                   Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG \
+                   Key=Component,Value=LoadBalancer \
             --query 'TargetGroups[0].TargetGroupArn' --output text)
-          echo "Created new target group: $TARGET_GROUP_ARN"
+          echo "Created new target group with ChopperTracker tagging: $TARGET_GROUP_ARN"
         else
           echo "Using existing target group: $TARGET_GROUP_ARN"
+          # Add tags to existing target group
+          aws elbv2 add-tags --resource-arns $TARGET_GROUP_ARN \
+            --tags Key=Name,Value=choppertracker-tg \
+                   Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG \
+                   Key=Component,Value=LoadBalancer
         fi
         
         # Create HTTP listener if it doesn't exist
@@ -315,9 +443,40 @@ jobs:
           echo "ELB service-linked role already exists"
         fi
         
-        # Use ChopperTracker ECS cluster
+        # Create or get ChopperTracker ECS cluster with proper tagging
         CLUSTER_NAME="choppertracker-cluster"
-        echo "Using ECS cluster: $CLUSTER_NAME"
+        echo "Setting up ECS cluster: $CLUSTER_NAME"
+        
+        # Check if cluster exists
+        if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --query 'clusters[0].clusterName' --output text 2>/dev/null | grep -q "$CLUSTER_NAME"; then
+          echo "Creating ECS cluster with ChopperTracker tagging..."
+          aws ecs create-cluster \
+            --cluster-name $CLUSTER_NAME \
+            --capacity-providers FARGATE \
+            --default-capacity-provider-strategy capacityProvider=FARGATE,weight=1 \
+            --tags Key=Name,Value=$CLUSTER_NAME \
+                   Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG \
+                   Key=Component,Value=Backend
+          echo "Created ECS cluster with ChopperTracker tagging"
+        else
+          echo "ECS cluster already exists: $CLUSTER_NAME"
+          # Add tags to existing cluster
+          CLUSTER_ARN="arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${CLUSTER_NAME}"
+          aws ecs tag-resource --resource-arn $CLUSTER_ARN \
+            --tags Key=Name,Value=$CLUSTER_NAME \
+                   Key=Project,Value=$PROJECT_TAG \
+                   Key=Environment,Value=$ENVIRONMENT_TAG \
+                   Key=Owner,Value=$OWNER_TAG \
+                   Key=Application,Value=$APPLICATION_TAG \
+                   Key=ManagedBy,Value=$MANAGED_BY_TAG \
+                   Key=CostCenter,Value=$COST_CENTER_TAG \
+                   Key=Component,Value=Backend
+        fi
         
         # Wait for cluster to be ready
         sleep 15
@@ -362,6 +521,23 @@ jobs:
         if [ "$ROLE_ARN" = "None" ] || [ -z "$ROLE_ARN" ]; then
           echo "ERROR: Role does not exist or is not accessible"
           exit 1
+        fi
+        
+        # Create CloudWatch log group with ChopperTracker tagging
+        LOG_GROUP_NAME="/ecs/choppertracker"
+        echo "Setting up CloudWatch log group: $LOG_GROUP_NAME"
+        
+        if ! aws logs describe-log-groups --log-group-name-prefix $LOG_GROUP_NAME --query "logGroups[?logGroupName=='$LOG_GROUP_NAME']" --output text | grep -q "$LOG_GROUP_NAME"; then
+          echo "Creating CloudWatch log group with ChopperTracker tagging..."
+          aws logs create-log-group --log-group-name $LOG_GROUP_NAME
+          aws logs tag-log-group --log-group-name $LOG_GROUP_NAME \
+            --tags Project=$PROJECT_TAG,Environment=$ENVIRONMENT_TAG,Owner=$OWNER_TAG,Application=$APPLICATION_TAG,ManagedBy=$MANAGED_BY_TAG,CostCenter=$COST_CENTER_TAG,Component=Logging
+          echo "Created CloudWatch log group with ChopperTracker tagging"
+        else
+          echo "CloudWatch log group already exists"
+          # Add tags to existing log group
+          aws logs tag-log-group --log-group-name $LOG_GROUP_NAME \
+            --tags Project=$PROJECT_TAG,Environment=$ENVIRONMENT_TAG,Owner=$OWNER_TAG,Application=$APPLICATION_TAG,ManagedBy=$MANAGED_BY_TAG,CostCenter=$COST_CENTER_TAG,Component=Logging
         fi
         
         # Create task definition with updated application image
@@ -457,9 +633,33 @@ jobs:
           echo "No CloudFront distribution found (result: '$DISTRIBUTION_ID')"
         fi
 
-    - name: Output deployment URL
+    - name: Output deployment URLs and Cost Tracking Info
       run: |
         source deployment_vars.env
-        echo "Frontend deployed to: http://choppertracker-frontend.s3-website-${AWS_REGION}.amazonaws.com"
-        echo "Backend API available at: http://$ALB_DNS"
-        echo "Note: CloudFront distribution will be created separately if needed"
+        echo ""
+        echo "🎉 ChopperTracker deployment complete in main account with comprehensive tagging!"
+        echo ""
+        echo "📱 Frontend URL: http://choppertracker-frontend.s3-website-${AWS_REGION}.amazonaws.com"
+        echo "🔗 Backend API URL: http://$ALB_DNS"
+        echo ""
+        echo "💰 Cost Tracking Information:"
+        echo "   All ChopperTracker resources are tagged with:"
+        echo "   - Project: $PROJECT_TAG"
+        echo "   - Environment: $ENVIRONMENT_TAG" 
+        echo "   - CostCenter: $COST_CENTER_TAG"
+        echo ""
+        echo "📊 To view ChopperTracker costs:"
+        echo "   1. Go to AWS Cost Explorer"
+        echo "   2. Filter by tag: Project = ChopperTracker"
+        echo "   3. Set up AWS Budgets with the same tag filter"
+        echo ""
+        echo "🏷️  Tagged Resources Created/Updated:"
+        echo "   - S3 Bucket: choppertracker-frontend"
+        echo "   - ECR Repository: choppertracker-backend" 
+        echo "   - ALB: choppertracker-alb"
+        echo "   - Target Group: choppertracker-tg"
+        echo "   - ECS Cluster: choppertracker-cluster"
+        echo "   - Security Groups: choppertracker-alb-sg, choppertracker-ecs-sg"
+        echo "   - CloudWatch Log Group: /ecs/choppertracker"
+        echo ""
+        echo "✅ Ready for custom domain setup (choppertracker.com, api.choppertracker.com)"
