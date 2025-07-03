@@ -110,8 +110,8 @@ jobs:
 
     - name: Deploy frontend to S3
       run: |
-        # Use ChopperTracker S3 bucket with proper tagging
-        BUCKET_NAME="choppertracker-frontend"
+        # Use ChopperTracker S3 bucket with proper tagging (globally unique name)
+        BUCKET_NAME="choppertracker-frontend-${AWS_ACCOUNT_ID}"
         echo "Using S3 bucket: $BUCKET_NAME"
         
         # Debug: Show current identity and test access
@@ -639,7 +639,7 @@ jobs:
         echo ""
         echo "🎉 ChopperTracker deployment complete in main account with comprehensive tagging!"
         echo ""
-        echo "📱 Frontend URL: http://choppertracker-frontend.s3-website-${AWS_REGION}.amazonaws.com"
+        echo "📱 Frontend URL: http://choppertracker-frontend-${AWS_ACCOUNT_ID}.s3-website-${AWS_REGION}.amazonaws.com"
         echo "🔗 Backend API URL: http://$ALB_DNS"
         echo ""
         echo "💰 Cost Tracking Information:"
@@ -654,7 +654,7 @@ jobs:
         echo "   3. Set up AWS Budgets with the same tag filter"
         echo ""
         echo "🏷️  Tagged Resources Created/Updated:"
-        echo "   - S3 Bucket: choppertracker-frontend"
+        echo "   - S3 Bucket: choppertracker-frontend-${AWS_ACCOUNT_ID}"
         echo "   - ECR Repository: choppertracker-backend" 
         echo "   - ALB: choppertracker-alb"
         echo "   - Target Group: choppertracker-tg"
