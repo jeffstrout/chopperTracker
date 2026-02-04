@@ -23,7 +23,11 @@ class RedisService:
         """Connect to Redis"""
         try:
             config = get_redis_config()
-            self.redis_client = redis.Redis(**config)
+            if "url" in config:
+                url = config.pop("url")
+                self.redis_client = redis.Redis.from_url(url, **config)
+            else:
+                self.redis_client = redis.Redis(**config)
             self.redis_client.ping()
             logger.info("Connected to Redis successfully")
         except Exception as e:

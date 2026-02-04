@@ -135,10 +135,28 @@ def load_config(config_file: Optional[str] = None) -> Config:
 
 
 def get_redis_config() -> Dict[str, Any]:
-    """Get Redis connection configuration with environment variable defaults"""
-    return {
+    """Get Redis connection configuration with environment variable defaults.
+
+    Supports REDIS_URL for managed database services (e.g., Digital Ocean Valkey),
+    or individual REDIS_HOST/REDIS_PORT/REDIS_DB environment variables.
+    """
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        # DO managed databases use rediss:// (TLS) or redis:// URLs
+        return {
+            "url": redis_url,
+            "decode_responses": True
+        }
+
+    config = {
         "host": os.getenv("REDIS_HOST", "localhost"),
         "port": int(os.getenv("REDIS_PORT", "6379")),
         "db": int(os.getenv("REDIS_DB", "0")),
         "decode_responses": True
     }
+
+    redis_password = os.getenv("REDIS_PASSWORD")
+    if redis_password:
+        config["password"] = redis_password
+
+    return config
