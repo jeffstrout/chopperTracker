@@ -40,6 +40,9 @@ services:
       - key: TZ
         scope: RUN_TIME
         value: America/Chicago
+      - key: AIRCRAFT_DB_URL
+        scope: RUN_TIME
+        value: https://choppertracker-assets.nyc3.digitaloceanspaces.com/data/aircraftDatabase.csv
     health_check:
       http_path: /health
       initial_delay_seconds: 30

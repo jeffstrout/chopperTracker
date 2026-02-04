@@ -93,6 +93,17 @@ RUN printf '%s\n' \
     '    exit 1' \
     'fi' \
     '' \
+    '# Download aircraft database if not present and URL is configured' \
+    'if [ ! -f "/app/config/aircraftDatabase.csv" ] && [ -n "$AIRCRAFT_DB_URL" ]; then' \
+    '    echo "Downloading aircraft database from $AIRCRAFT_DB_URL ..."' \
+    '    curl -fsSL -o /app/config/aircraftDatabase.csv "$AIRCRAFT_DB_URL"' \
+    '    if [ $? -eq 0 ]; then' \
+    '        echo "Aircraft database downloaded successfully"' \
+    '    else' \
+    '        echo "Warning: Failed to download aircraft database"' \
+    '    fi' \
+    'fi' \
+    '' \
     '# Start the application' \
     'echo "Starting FastAPI server..."' \
     'cd /app' \
