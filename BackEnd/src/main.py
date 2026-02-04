@@ -72,7 +72,7 @@ app = FastAPI(
 )
 
 # Add trusted hosts middleware to accept vanity domains
-from fastapi.middleware.trustedhosts import TrustedHostMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Add TrustedHostMiddleware for all expected domains
 app.add_middleware(
