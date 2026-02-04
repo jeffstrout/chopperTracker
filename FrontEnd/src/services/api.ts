@@ -7,7 +7,9 @@ class FlightTrackerAPI {
 
   constructor() {
     // Use environment variable with fallback for development
-    this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    this.baseURL = import.meta.env.VITE_API_BASE_URL || 
+                   (window as any).FLIGHT_TRACKER_CONFIG?.API_BASE_URL || 
+                   'http://localhost:8000/api/v1';
     
     this.client = axios.create({
       baseURL: this.baseURL,

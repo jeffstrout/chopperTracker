@@ -18,15 +18,8 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 # Final stage
 FROM python:3.11-slim
 
-# Install runtime dependencies including AWS CLI
-RUN apt-get update && apt-get install -y \
-    curl \
-    unzip \
-    && curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip \
-    && ./aws/install \
-    && rm -rf awscliv2.zip aws \
-    && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser
@@ -59,11 +52,6 @@ RUN test -d /app/src && echo "✓ src directory found" || exit 1
 RUN test -f /app/src/main.py && echo "✓ main.py found" || exit 1
 RUN test -d /app/config && echo "✓ config directory found" || exit 1
 
-# Copy and make download script executable
-COPY --chown=appuser:appuser scripts/download_aircraft_db.sh /app/scripts/
-COPY --chown=appuser:appuser scripts/download_config.sh /app/scripts/
-RUN chmod +x /app/scripts/download_aircraft_db.sh /app/scripts/download_config.sh
-
 # Create logs directory with proper permissions
 RUN mkdir -p logs && chown -R appuser:appuser logs
 
@@ -92,36 +80,21 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Create startup script as root first
+# Create startup script
 RUN printf '%s\n' \
     '#!/bin/bash' \
-    'echo "🚀 Starting Flight Tracker Collector..."' \
-    '' \
-    '# Download aircraft database (continue even if it fails)' \
-    'if [ -f "/app/scripts/download_aircraft_db.sh" ]; then' \
-    '    echo "📥 Running aircraft database download script..."' \
-    '    /app/scripts/download_aircraft_db.sh || echo "⚠️  Aircraft database download failed, continuing without enrichment"' \
-    'fi' \
-    '' \
-    '# Download config if needed (continue even if it fails)' \
-    'if [ -f "/app/scripts/download_config.sh" ]; then' \
-    '    echo "📥 Running config download script..."' \
-    '    /app/scripts/download_config.sh || echo "⚠️  Config download failed, using default config"' \
-    'fi' \
+    'echo "Starting Flight Tracker Collector..."' \
     '' \
     '# Verify critical files exist' \
-    'echo "🔍 Verifying application files..."' \
     'if [ ! -f "/app/src/main.py" ]; then' \
-    '    echo "❌ Critical error: main.py not found"' \
-    '    echo "📂 Contents of /app:"' \
+    '    echo "Critical error: main.py not found"' \
     '    ls -la /app/' \
-    '    echo "📂 Contents of /app/src:"' \
     '    ls -la /app/src/ || echo "src directory not found"' \
     '    exit 1' \
     'fi' \
     '' \
     '# Start the application' \
-    'echo "🌐 Starting FastAPI server..."' \
+    'echo "Starting FastAPI server..."' \
     'cd /app' \
     'exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1' \
     > /app/start.sh && chmod +x /app/start.sh && chown appuser:appuser /app/start.sh

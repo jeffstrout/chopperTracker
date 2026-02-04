@@ -1,57 +1,47 @@
-# Production configuration using external centralized Redis
+# Production configuration for Digital Ocean deployment
 version: '3.8'
 
 services:
-  # Flight Tracker Collector Service
-  collector:
+  app:
     build: .
-    container_name: flight_collector
+    container_name: choppertracker
     restart: unless-stopped
     environment:
-      - REDIS_HOST=shared_redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0  # Flight tracker uses database 0
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - TZ=${TZ:-America/Los_Angeles}
-      - CONFIG_FILE=collectors.yaml  # Use production config
-    volumes:
-      - ./config:/app/config:ro
-      - flight_logs:/app/logs
-    networks:
-      - shared_services
-    external_links:
-      - shared_redis:shared_redis
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Web API Service
-  web_api:
-    build: .
-    container_name: flight_web_api
-    restart: unless-stopped
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
-    environment:
-      - REDIS_HOST=shared_redis
+      - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TZ=${TZ:-America/Chicago}
+      - CONFIG_FILE=collectors.yaml
+      - API_BASE_URL=${API_BASE_URL:-https://api.choppertracker.com/api/v1}
+      - ENV=production
+      - FRONTEND_URL=${FRONTEND_URL:-https://choppertracker.com}
     ports:
       - "8000:8000"
     volumes:
       - ./config:/app/config:ro
-    networks:
-      - shared_services
-    external_links:
-      - shared_redis:shared_redis
+      - app_logs:/app/logs
     depends_on:
-      - collector
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: choppertracker_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  flight_logs:
-
-networks:
-  shared_services:
-    external: true
+  redis_data:
+  app_logs:

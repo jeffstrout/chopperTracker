@@ -1,34 +1,32 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, Response, RedirectResponse
 
 from .config.loader import load_config
 from .services.collector_service import CollectorService
 from .api.endpoints import router
 from .utils.logging_config import setup_logging
 from .version import VERSION_INFO
-from .middleware.security import SecurityMiddleware, CloudWatchAlarmsService
-# from .mcp import MCPServer  # Temporarily disabled until MCP package is available
+from .middleware.security import SecurityMiddleware
 
 
 # Global service instances
 collector_service = None
 security_middleware_instance = None
-cloudwatch_service = CloudWatchAlarmsService()
-# mcp_server = None  # Temporarily disabled
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan context manager"""
-    global collector_service  # , mcp_server
+    global collector_service
     
     # Startup
     logging.info("Starting Flight Tracker Collector API")
@@ -44,16 +42,10 @@ async def lifespan(app: FastAPI):
         # Initialize collector service
         collector_service = CollectorService(config)
         
-        # Initialize MCP server with shared services
-        from .services.redis_service import RedisService
-        redis_service = RedisService()
-        # mcp_server = MCPServer(redis_service, collector_service)  # Temporarily disabled
-        
         # Start background collection task
         collection_task = asyncio.create_task(collector_service.run_continuous())
         
         logging.info("Flight Tracker Collector API started successfully")
-        logging.info("MCP server initialized and ready")
         
         yield
         
@@ -80,14 +72,40 @@ app = FastAPI(
 )
 
 # Add trusted hosts middleware to accept vanity domains
-# Note: We're not using TrustedHostMiddleware because it blocks ALB health checks
-# Instead, we'll implement host validation in the SecurityMiddleware if needed
+from fastapi.middleware.trustedhosts import TrustedHostMiddleware
 
-# Add CORS middleware - allow all origins for public flight tracking API
+# Add TrustedHostMiddleware for all expected domains
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "api.choppertracker.com",
+        "www.choppertracker.com",
+        "choppertracker.com",
+        "*.choppertracker.com",
+        "*.ondigitalocean.app",
+    ]
+)
+
+# Add CORS middleware - configured for vanity domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins since this is a public read-only API
-    allow_credentials=False,  # Must be False when using allow_origins=["*"]
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://localhost:3000",
+        "https://localhost:5173",
+        "https://choppertracker.com",
+        "https://www.choppertracker.com",
+        "https://api.choppertracker.com",
+        "http://choppertracker.com",
+        "http://www.choppertracker.com",
+        "http://api.choppertracker.com",
+        "*",
+    ],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -124,25 +142,36 @@ if static_dir.exists():
 @app.get("/config.js", response_class=PlainTextResponse)
 async def get_config():
     """Serve frontend configuration with version info"""
+    api_base_url = os.environ.get('API_BASE_URL', 'http://localhost:8000/api/v1')
+    env = os.environ.get('ENV', 'development')
     config_js = f"""
 window.FLIGHT_TRACKER_CONFIG = {{
-    API_BASE_URL: 'https://flight-tracker-alb-790028972.us-east-1.elb.amazonaws.com/api/v1',
-    ENV: 'production',
+    API_BASE_URL: '{api_base_url}',
+    ENV: '{env}',
     VERSION: {json.dumps(VERSION_INFO)},
     CACHE_BUST: '{int(time.time())}'
 }};
 """
     return config_js
 
-# Add root endpoint
+# Add root endpoint with redirect logic for main domain
 @app.get("/")
-async def root():
-    """Root endpoint"""
+async def root(request: Request):
+    """Root endpoint with domain-specific behavior"""
+    host = request.headers.get("host", "")
+    frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+
+    # If accessed via main domain or www, redirect to frontend
+    if host in ["choppertracker.com", "www.choppertracker.com"]:
+        return RedirectResponse(url=frontend_url, status_code=302)
+
+    # API endpoint response
     return {
         "message": "Flight Tracker Collector API",
         "version": VERSION_INFO['version'],
         "docs": "/docs",
-        "status": "/api/v1/status"
+        "status": "/api/v1/status",
+        "frontend": frontend_url
     }
 
 
@@ -152,9 +181,6 @@ async def health():
     """Health check endpoint"""
     return {"status": "healthy"}
 
-
-# MCP endpoints - Temporarily disabled
-# All MCP functionality has been disabled until package dependencies are resolved
 
 if __name__ == "__main__":
     # Setup logging
