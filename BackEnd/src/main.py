@@ -71,23 +71,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add trusted hosts middleware to accept vanity domains
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-
-# Add TrustedHostMiddleware for all expected domains
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=[
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "api.choppertracker.com",
-        "www.choppertracker.com",
-        "choppertracker.com",
-        "*.choppertracker.com",
-        "*.ondigitalocean.app",
-    ]
-)
 
 # Add CORS middleware - configured for vanity domains
 app.add_middleware(
