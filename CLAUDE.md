@@ -17,9 +17,11 @@ A real-time helicopter and aircraft tracking system with a responsive web interf
 
 ### Technology Stack
 - **Frontend**: Vite + React 18 (TypeScript), Leaflet.js, Tailwind CSS, Axios
-- **Backend**: Python 3.11+, FastAPI, Redis, httpx, Pydantic
+- **Backend**: Python 3.11+, FastAPI, Redis/Valkey, httpx, Pydantic
 - **Pi Forwarder**: Python 3, requests library
-- **Deployment**: Docker + Docker Compose, Digital Ocean
+- **Deployment**: Digital Ocean App Platform (auto-deploy from GitHub)
+- **Database**: DO Managed Valkey (Redis-compatible) for caching
+- **Static Assets**: DO Spaces for large files (aircraftDatabase.csv)
 
 ### Data Flow
 1. **Multi-Source Data Collection**: Collectors run concurrently via asyncio
@@ -115,14 +117,17 @@ VITE_DEFAULT_REGION=etex                          # Default region
 
 ### Backend Environment Variables
 ```bash
-REDIS_HOST=localhost        # Redis host
-REDIS_PORT=6379             # Redis port
-REDIS_DB=0                  # Redis database
+REDIS_HOST=localhost        # Redis host (local dev)
+REDIS_PORT=6379             # Redis port (local dev)
+REDIS_DB=0                  # Redis database (local dev)
+REDIS_URL=                  # Redis/Valkey connection URL (production, overrides host/port/db)
+REDIS_PASSWORD=             # Redis password (if not using REDIS_URL)
 LOG_LEVEL=INFO              # Log level
 CONFIG_FILE=collectors.yaml # Collector config file
 API_BASE_URL=http://localhost:8000/api/v1  # API URL for config.js
 ENV=development             # Environment name
 FRONTEND_URL=http://localhost:5173  # Frontend redirect URL
+AIRCRAFT_DB_URL=            # URL to download aircraftDatabase.csv at startup
 ```
 
 ## Development
@@ -152,16 +157,44 @@ cd BackEnd
 docker build -t choppertracker-backend .
 ```
 
-### Production Deployment (Digital Ocean)
+### Production Deployment (Digital Ocean App Platform)
+
+The app is deployed via DO App Platform with auto-deploy on push to `main`.
+
+**App spec**: `.do/app.yaml`
+**Live URL**: `https://choppertracker-ecloe.ondigitalocean.app`
+
+**Infrastructure**:
+- **App Platform**: Backend API service + static frontend site
+- **Valkey Database**: Managed Redis-compatible cache (`choppertracker-cache`)
+- **DO Spaces**: `choppertracker-assets` bucket for aircraftDatabase.csv
+
+**Manual deployment** (if needed):
+```bash
+# Update app spec
+doctl apps update <app-id> --spec .do/app.yaml
+
+# Force redeploy
+doctl apps create-deployment <app-id>
+```
+
+**Docker Compose** (alternative local/VPS deployment):
 ```bash
 cd BackEnd
 docker-compose -f docker-compose.prod.yml up -d
 ```
 
-Set environment variables for production:
-- `API_BASE_URL=https://api.choppertracker.com/api/v1`
-- `ENV=production`
-- `FRONTEND_URL=https://choppertracker.com`
+**Updating aircraft database**:
+```bash
+# Upload new CSV to DO Spaces
+AWS_ACCESS_KEY_ID=<key> AWS_SECRET_ACCESS_KEY=<secret> \
+  aws s3 cp BackEnd/config/aircraftDatabase.csv \
+  s3://choppertracker-assets/data/aircraftDatabase.csv \
+  --endpoint-url https://nyc3.digitaloceanspaces.com --acl public-read
+
+# Redeploy to pick up new file
+doctl apps create-deployment <app-id>
+```
 
 ## Raspberry Pi ADS-B Forwarder
 
